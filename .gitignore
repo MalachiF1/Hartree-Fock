@@ -1,0 +1,13 @@
+/bin/
+/obj/
+.DS_Store
+Thumbs.db
+.cache/
+.vscode/
+.idea/
+.clangd
+compile_commands.json
+*.swp
+*.swo
+*.log
+*.tmp
