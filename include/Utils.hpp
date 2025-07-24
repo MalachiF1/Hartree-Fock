@@ -12,3 +12,12 @@ using Vec3 = Eigen::Vector3d;
  * @return The double factorial of n, or 1 if n is -1.
  */
 int dfact(int n);
+
+/**
+ * Computes the Boys function F_m(T) using the hypergeometric function.
+ *
+ * @param m The order of the Boys function.
+ * @param T The argument of the Boys function.
+ * @return The value of the Boys function F_m(T).
+ */
+double boys(int m, double T);

@@ -33,11 +33,15 @@ Checks: >
   -readability-uppercase-literal-suffix,
 CheckOptions:
   - { key: readability-identifier-naming.ClassCase, value: CamelCase }
-  - { key: readability-identifier-naming.FunctionCase, value: camelBack }
+  # - { key: readability-identifier-naming.FunctionCase, value: camelBack }
   # - { key: readability-identifier-naming.VariableCase, value: camelBack }
   # - { key: readability-identifier-naming.ParameterCase, value: camelBack }
   # This regex allows either a single uppercase letter (e.g., T) OR
   # a standard camelCase identifier for variables.
+  - {
+      key: readability-identifier-naming.FunctionCase,
+      value: "^[A-Z]$|^[a-z][a-zA-Z0-9]*$",
+    }
   - {
       key: readability-identifier-naming.VariableCase,
       value: "^[A-Z]$|^[a-z][a-zA-Z0-9]*$",
