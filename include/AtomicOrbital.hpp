@@ -8,16 +8,20 @@ class AtomicOrbital
 {
   public:
     const Vec3 center;
-    const std::vector<PrimitiveGaussian> primitives;
 
     AtomicOrbital(const Vec3& center, const std::vector<PrimitiveGaussian>& primitives);
-
 
     /**
      * Returns a string representation of the atomic orbital.
      * @return A string containing the center and the primitive gaussians of the orbital.
      */
     std::string toString() const;
+
+    /**
+     * Get the primitive gaussians that make up the atomic orbital.
+     * @return the reference to the vector of primitive gaussians that make up the atomic orbital.
+     */
+    const std::vector<PrimitiveGaussian>& getPrimitives() const { return primitives; }
 
     /**
      * Calculates the overlap integral between two atomic orbitals.
@@ -85,4 +89,6 @@ class AtomicOrbital
      * @return The value of the auxiliary integral R_tuv.
      */
     static double R(int t, int u, int v, int n, double p, const Vec3& PC, double T);
+
+    const std::vector<PrimitiveGaussian> primitives;
 };

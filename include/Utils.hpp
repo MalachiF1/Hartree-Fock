@@ -5,6 +5,15 @@
 using Vec3 = Eigen::Vector3d;
 
 /**
+ * Represents an atom with its atomic number and coordinates.
+ */
+struct Atom
+{
+    int atomicNumber;
+    Vec3 coords;
+};
+
+/**
  * Struct to hold shell information from a basis set
  */
 struct Shell
