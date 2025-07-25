@@ -1,5 +1,6 @@
 #include "SCF.hpp"
 
+#include "DIIS.hpp"
 #include "Utils.hpp"
 
 #include <iomanip>
@@ -7,13 +8,28 @@
 
 SCF::SCF(const Molecule& molecule) : molecule(molecule) {}
 
-void SCF::run(size_t maxIter, double energyTol, double densityTol, double schwartzThreshold)
+void SCF::run(
+    size_t maxIter,
+    double energyTol,
+    double densityTol,
+    double schwartzThreshold,
+    bool useDIIS,
+    size_t DIISmaxSize,
+    unsigned DIISstart,
+    double DIISErrorTol
+)
 {
     // Initialize the SCF calculation. (This should be called only once.)
     this->initialize(schwartzThreshold);
 
     // Get the initial guess density.
     this->computeInitialGuessDensity();
+
+    if (useDIIS)
+    {
+        // Initialize the DIIS handler with the specified maximum size.
+        diis_handler = std::make_unique<DIIS>(DIISmaxSize);
+    }
 
     std::cout << "\n--- Starting SCF Iterations ---\n" << std::endl;
 
@@ -27,18 +43,42 @@ void SCF::run(size_t maxIter, double energyTol, double densityTol, double schwar
         // Build the new Fock matrix from the current density.
         this->buildFockMatrix();
 
+        // Store the error vector and fock matrix for DIIS if applicable.
+        if (useDIIS)
+        {
+            diis_handler->update(this->F, this->D, this->S, this->X);
+        }
+
         // Diagonalize the Fock matrix and compute the new density and coefficients.
-        this->diagonalizeAndUpdate();
+        if (useDIIS && iteration >= DIISstart)
+        {
+            // Extrapolate the orthogonal Fock matrix using DIIS.
+            Eigen::MatrixXd F_prime = diis_handler->extrapolate(this->F);
+
+            this->diagonalizeAndUpdate(F_prime);
+        }
+        else
+        {
+            this->diagonalizeAndUpdate();
+        }
 
         // Calculate the change in energy and density.
         double dE = std::abs(this->electronicEnergy - lastElectronicEnergy);
         double dD = (this->D - D_last).norm();
 
-        this->printIteration(iteration + 1, dE, dD);
+        if (useDIIS)
+        {
+            this->printIteration(iteration + 1, dE, dD, diis_handler->getErrorNorm());
+        }
+        else
+        {
+            this->printIteration(iteration + 1, dE, dD);
+        }
 
         // Check for convergence.
-        if (dE < energyTol && dD < densityTol)
+        if (dE < energyTol && dD < densityTol && (!useDIIS || diis_handler->getErrorNorm() < DIISErrorTol))
         {
+            // If converged, print the final results and exit.
             this->printFinalResults(true);
             return;
         }
@@ -51,8 +91,6 @@ void SCF::run(size_t maxIter, double energyTol, double densityTol, double schwar
 void SCF::initialize(double schwartzThreshold)
 {
     std::cout << "Starting SCF calculation..." << std::endl;
-    std::cout << "Number of electrons: " << molecule.getElectronCount() << std::endl;
-    std::cout << "Number of basis functions: " << molecule.getBasisFunctionCount() << std::endl;
     std::cout << molecule.toString() << std::endl;
 
     // Set constant parameters.
@@ -73,7 +111,7 @@ void SCF::initialize(double schwartzThreshold)
     this->X = inverseSqrtMatrix(this->S);
 }
 
-// Computes the initial guess for the density matrix using the core Hamiltonian.
+
 void SCF::computeInitialGuessDensity()
 {
     // The initial Fock matrix is just the core Hamiltonian.
@@ -92,7 +130,7 @@ void SCF::computeInitialGuessDensity()
     this->electronicEnergy = (this->D.array() * (this->h + this->F).array()).sum() * 0.5;
 }
 
-// Builds the Fock matrix G from the two-electron integrals and the density matrix.
+
 void SCF::buildFockMatrix()
 {
     size_t N_ao       = this->basisCount;
@@ -118,7 +156,7 @@ void SCF::buildFockMatrix()
     this->F = this->h + G;
 }
 
-// Solves the eigenvalue problem F'C' = E'C' and computes the new density matrix.
+
 void SCF::diagonalizeAndUpdate()
 {
     // Transform the Fock matrix to the orthogonal basis.
@@ -138,14 +176,38 @@ void SCF::diagonalizeAndUpdate()
     this->electronicEnergy = (this->D.array() * (this->h + this->F).array()).sum() * 0.5;
 }
 
-// Prints the status for a single SCF iteration.
+
+void SCF::diagonalizeAndUpdate(const Eigen::MatrixXd& F_prime)
+{
+    // Find the eigenvalues and eigenvectors.
+    Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> solver(F_prime);
+
+    // Transform the eigenvectors back to the original basis.
+    this->C = this->X * solver.eigenvectors();
+
+    // Form the new density matrix from the occupied orbitals.
+    Eigen::MatrixXd C_occ = this->C.leftCols(this->occupiedCount);
+    this->D               = 2 * C_occ * C_occ.transpose();
+
+    // Calculate the new electronic energy.
+    this->electronicEnergy = (this->D.array() * (this->h + this->F).array()).sum() * 0.5;
+}
+
+
 void SCF::printIteration(int iter, double dE, double dD) const
 {
     std::cout << "Iteration " << std::setw(3) << iter << ": "
               << " | dE = " << std::scientific << dE << " | dD = " << dD << std::endl;
 }
 
-// Prints the final results of the SCF calculation.
+
+void SCF::printIteration(int iter, double dE, double dD, double DIISError) const
+{
+    std::cout << "Iteration " << std::setw(3) << iter << ": "
+              << " | dE = " << std::scientific << dE << " | dD = " << dD << " | DIIS error = " << DIISError << std::endl;
+}
+
+
 void SCF::printFinalResults(bool converged) const
 {
     if (converged)

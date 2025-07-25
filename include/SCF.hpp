@@ -1,4 +1,5 @@
 #pragma once
+#include "DIIS.hpp"
 #include "Molecule.hpp"
 
 #include <Eigen/Dense>
@@ -15,7 +16,16 @@ class SCF
      * @param density_tol Convergence tolerance for density matrix.
      * @param schwartz_threshold Threshold for Schwartz screening of two-electron integrals.
      */
-    void run(size_t maxIter = 50, double energyTol = 1e-8, double densityTol = 1e-8, double schwartzThreshold = 1e-10);
+    void run(
+        size_t maxIter           = 50,
+        double energyTol         = 1e-8,
+        double densityTol        = 1e-8,
+        double schwartzThreshold = 1e-10,
+        bool useDIIS             = true,
+        size_t DIISmaxSize       = 8,
+        unsigned DIISstart       = 1,
+        double DIISErrorTol      = 1e-8
+    );
 
   private:
     // A constant reference to the molecule object.
@@ -37,6 +47,9 @@ class SCF
     Eigen::MatrixXd D;       // Density matrix
     Eigen::MatrixXd F;       // Fock matrix
     Eigen::MatrixXd C;       // MO coefficient matrix
+
+    // Pointer to the DIIs object (if used).
+    std::unique_ptr<DIIS> diis_handler;
 
     /*
      * Initializes the SCF calculation by computing necessary matrices and parameters (one-time calculations).
@@ -64,6 +77,7 @@ class SCF
      * Diagonalizes the Fock matrix to obtain the molecular orbitals and updates the density matrix and coefficient matrix.
      */
     void diagonalizeAndUpdate();
+    void diagonalizeAndUpdate(const Eigen::MatrixXd& F_prime); // overload for DIIS
 
     /*
      * Prints the status of a single SCF iteration.
@@ -72,6 +86,15 @@ class SCF
      * @param dD The change in density matrix from the previous iteration.
      */
     void printIteration(int iter, double dE, double dD) const;
+
+    /*
+     * Prints the status of a single SCF iteration.
+     * @param iter The current iteration number.
+     * @param dE The change in electronic energy from the previous iteration.
+     * @param dD The change in density matrix from the previous iteration.
+     * @param DIISError The DIIS error norm for the current iteration.
+     */
+    void printIteration(int iter, double dE, double dD, double DIISError) const;
 
     /*
      * Prints the final results of the SCF calculation, including whether it converged and the final electronic energy.
