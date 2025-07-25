@@ -1,10 +1,20 @@
 # Makefile for the C++ Hartree-Fock Program
 
+# --- Build Configuration ---
+# Set to 1 to use the Boost library for the Boys function.
+# Requires the Boost development libraries to be installed.
+USE_BOOST = 1
+# --- End Configuration ---
+
 # Compiler
 CXX = g++
 
 # Compiler flags
 CXXFLAGS = -std=c++17 -g -Iinclude -Ieigen -Wall -Wextra
+
+ifeq ($(USE_BOOST), 1)
+    CXXFLAGS += -DHAVE_BOOST
+endif
 
 # Linker flags (e.g., for linking external libraries)
 LDFLAGS =
