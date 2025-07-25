@@ -51,7 +51,7 @@ class Molecule
      * @param threshold The Schwartz screening threshold below which integrals are considered negligible and set to zero.
      * @return A flattened 1D vector representing the electron repulsion tensor.
      */
-    std::vector<double> electronRepulsionTensor(double threshold = 1e-12) const;
+    std::vector<double> electronRepulsionTensor(double threshold = 1e-10) const;
 
     // Getters for molecule properties
     const std::vector<AtomicOrbital>& getAtomicOrbitals() const { return atomicOrbitals; }

@@ -280,7 +280,6 @@ double AtomicOrbital::R(int t, int u, int v, int n, double p, const Vec3& PC, do
     double result = 0.0;
     if (t > 0)
     {
-
         result = (t - 1) * R(t - 2, u, v, n + 1, p, PC, T) + PC.x() * R(t - 1, u, v, n + 1, p, PC, T);
     }
     else if (u > 0)

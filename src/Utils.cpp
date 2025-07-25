@@ -26,3 +26,26 @@ double boys(int m, double T)
     }
     return boost::math::hypergeometric_1F1(m + 0.5, m + 1.5, -T) / (2.0 * m + 1.0);
 }
+
+Eigen::MatrixXd inverseSqrtMatrix(const Eigen::MatrixXd& S)
+{
+    Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> solver(S);
+    const Eigen::VectorXd& eigenvalues  = solver.eigenvalues();
+    const Eigen::MatrixXd& eigenvectors = solver.eigenvectors();
+
+    Eigen::VectorXd sqrtInvEigenvalues(eigenvalues.size());
+    for (int i = 0; i < eigenvalues.size(); ++i)
+    {
+        if (eigenvalues(i) > 0)
+        {
+            sqrtInvEigenvalues(i) = 1.0 / std::sqrt(eigenvalues(i));
+        }
+        else
+        {
+            // Handle very small or zero eigenvalues if they occur
+            sqrtInvEigenvalues(i) = 0;
+        }
+    }
+
+    return eigenvectors * sqrtInvEigenvalues.asDiagonal() * eigenvectors.transpose();
+}

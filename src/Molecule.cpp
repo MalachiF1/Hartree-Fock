@@ -5,7 +5,6 @@
 #include <cstddef>
 #include <iomanip>
 #include <iostream>
-#include <numeric>
 #include <sstream>
 
 Molecule::Molecule(int charge, int multiplicity, const std::string& basisName, const std::vector<Atom>& geometry) :

@@ -40,3 +40,12 @@ int dfact(int n);
  * @return The value of the Boys function F_m(T).
  */
 double boys(int m, double T);
+
+/*
+ * Compute the inverse square root of a symmetric positive definite matrix S.
+ * This is used for symmetric orthogonalization (Löwdin orthogonalization).
+ *
+ * @param S The symmetric positive definite matrix.
+ * @return The inverse square root matrix S^(-1/2).
+ */
+Eigen::MatrixXd inverseSqrtMatrix(const Eigen::MatrixXd& S);
