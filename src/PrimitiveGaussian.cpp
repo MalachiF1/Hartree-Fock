@@ -24,7 +24,7 @@ double PrimitiveGaussian::normalizationConst(double exponent, int l, int m, int 
 std::string PrimitiveGaussian::toString() const
 {
     std::stringstream ss;
-    ss << std::fixed << std::setprecision(6);
+    ss << std::fixed << std::setprecision(8);
     ss << "PrimitiveGaussian {\n"
        << "\talpha:    " << this->exponent << "\n"
        << "\tcoeff:    " << this->coeff << "\n"

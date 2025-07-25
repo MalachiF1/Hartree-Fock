@@ -5,6 +5,16 @@
 using Vec3 = Eigen::Vector3d;
 
 /**
+ * Struct to hold shell information from a basis set
+ */
+struct Shell
+{
+    int angularMomentum;
+    std::vector<double> exponents;
+    std::vector<double> coefficients;
+};
+
+/**
  * Computes the double factorial of an integer n.
  * If n is -1, returns 1.
  *

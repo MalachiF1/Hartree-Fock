@@ -16,6 +16,10 @@ class PrimitiveGaussian
 
     PrimitiveGaussian(double exponent, double coeff, const Vec3& coords, int l, int m, int n);
 
+    /**
+     * Returns a string representation of the primitive Gaussian.
+     * @return A string containing the exponent, coefficient, coordinates, angular momentum numbers, and normalization constant.
+     */
     std::string toString() const;
 
   private:
