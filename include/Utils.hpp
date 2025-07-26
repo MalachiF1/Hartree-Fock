@@ -1,5 +1,8 @@
 #pragma once
 
+#define EIGEN_USE_BLAS
+#define EIGEN_USE_LAPACK
+
 #include <Eigen/Dense>
 
 /*

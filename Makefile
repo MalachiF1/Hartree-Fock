@@ -9,15 +9,19 @@ USE_BOOST = 1
 # Compiler
 CXX = g++
 
+# Debugging / optimization flags
+# -Wall -Wextra / -O3 -march=native -flto (also add -flto in LDFLAGS)
+
 # Compiler flags
-CXXFLAGS = -std=c++17 -g -Iinclude -Ieigen -Wall -Wextra
+CXXFLAGS = -std=c++17 -g -Iinclude -Ieigen -fopenmp -Wall -Wextra
 
 ifeq ($(USE_BOOST), 1)
     CXXFLAGS += -DHAVE_BOOST
 endif
 
 # Linker flags (e.g., for linking external libraries)
-LDFLAGS =
+# link OpenBLAS statically
+LDFLAGS = -Wl,-Bstatic -lopenblas -Wl,-Bdynamic
 
 # Directories
 SRCDIR = src
