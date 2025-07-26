@@ -1,14 +1,18 @@
 #include "AtomicOrbital.hpp"
 
+#include "Utils.hpp"
+
 #include <cmath>
-#include <map>
 #include <tuple>
+#include <unordered_map>
 
 // Memoization caches for the recursive integral helper functions.
+// The hash function for tuples is specialized in the std namespace (see Utils.hpp).
+// It is thread local for thread safety, as these functions are called in parallel in the electron repulsion integral calculation.
 namespace
 {
-std::map<std::tuple<int, int, int, double, double, double>, double> E_cache;
-std::map<std::tuple<int, int, int, int, double, double, double, double, double>, double> R_cache;
+thread_local std::unordered_map<std::tuple<int, int, int, double, double, double>, double> E_cache;
+thread_local std::unordered_map<std::tuple<int, int, int, int, double, double, double, double, double>, double> R_cache;
 } // namespace
 
 
@@ -214,21 +218,9 @@ double AtomicOrbital::electronRepulsion(
 
 double AtomicOrbital::E(int i, int l1, int l2, double Q, double exponentA, double exponentB)
 {
-    // Use a tuple as the key for the cache
-    auto key = std::make_tuple(i, l1, l2, Q, exponentA, exponentB);
-    // Check if the result is already cached
-    if (E_cache.count(key))
-    {
-        return E_cache[key];
-    }
-
-    double p = exponentA + exponentB;
-    double q = (exponentA * exponentB) / p;
-
-    double result = 0.0;
     if (i < 0 || i > (l1 + l2))
     {
-        // out of bounds
+        // out out bounds
         return 0.0;
     }
     else if (i == 0 && l1 == 0 && l2 == 0)
@@ -236,7 +228,19 @@ double AtomicOrbital::E(int i, int l1, int l2, double Q, double exponentA, doubl
         // base case
         return 1.0;
     }
-    else if (l2 == 0)
+
+    // check if the result is already cached
+    auto key = std::make_tuple(i, l1, l2, Q, exponentA, exponentB);
+    if (E_cache.count(key))
+    {
+        return E_cache.at(key);
+    }
+
+    double p = exponentA + exponentB;
+    double q = (exponentA * exponentB) / p;
+
+    double result = 0.0;
+    if (l2 == 0)
     {
         // decrement l1
         result = ((1.0 / (2.0 * p)) * E(i - 1, l1 - 1, l2, Q, exponentA, exponentB))
@@ -251,34 +255,32 @@ double AtomicOrbital::E(int i, int l1, int l2, double Q, double exponentA, doubl
                + ((i + 1) * E(i + 1, l1, l2 - 1, Q, exponentA, exponentB));
     }
 
-    // Store the result in the cache
+    // store the result in the cache
     E_cache[key] = result;
     return result;
 }
 
 double AtomicOrbital::R(int t, int u, int v, int n, double p, const Vec3& PC, double T)
 {
-    // Use a tuple as the key for the cache
-    auto key = std::make_tuple(t, u, v, n, p, PC.x(), PC.y(), PC.z(), T);
-    // Check if the result is already cached
-    if (R_cache.count(key))
-    {
-        return R_cache[key];
-    }
-
     if (t < 0 || u < 0 || v < 0)
     {
         // out of bounds
         return 0.0;
     }
-    else if (t == 0 && u == 0 && v == 0)
+
+    auto key = std::make_tuple(t, u, v, n, p, PC.x(), PC.y(), PC.z(), T);
+    if (R_cache.count(key))
     {
-        // base case
-        return std::pow(-2.0 * p, n) * boys(n, T);
+        return R_cache.at(key);
     }
 
     double result = 0.0;
-    if (t > 0)
+    if (t == 0 && u == 0 && v == 0)
+    {
+        // base case
+        result = std::pow(-2.0 * p, n) * boys(n, T);
+    }
+    else if (t > 0)
     {
         result = (t - 1) * R(t - 2, u, v, n + 1, p, PC, T) + PC.x() * R(t - 1, u, v, n + 1, p, PC, T);
     }
@@ -286,8 +288,8 @@ double AtomicOrbital::R(int t, int u, int v, int n, double p, const Vec3& PC, do
     {
         result = (u - 1) * R(t, u - 2, v, n + 1, p, PC, T) + PC.y() * R(t, u - 1, v, n + 1, p, PC, T);
     }
-    else
-    { // v > 0
+    else // v > 0
+    {
         result = (v - 1) * R(t, u, v - 2, n + 1, p, PC, T) + PC.z() * R(t, u, v - 1, n + 1, p, PC, T);
     }
 

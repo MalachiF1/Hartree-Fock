@@ -136,18 +136,24 @@ void SCF::buildFockMatrix()
     size_t N_ao       = this->basisCount;
     Eigen::MatrixXd G = Eigen::MatrixXd::Zero(N_ao, N_ao);
 
+#pragma omp parallel for collapse(2)
     for (size_t i = 0; i < N_ao; ++i)
     {
         for (size_t j = 0; j < N_ao; ++j)
         {
-            for (size_t k = 0; k < N_ao; ++k)
+            if (j <= i)
             {
-                for (size_t l = 0; l < N_ao; ++l)
+                double G_ij = 0.0;
+                for (size_t k = 0; k < N_ao; ++k)
                 {
-                    double J_ij = this->Vee[(i * N_ao * N_ao * N_ao) + (j * N_ao * N_ao) + (k * N_ao) + l];
-                    double K_ik = this->Vee[(i * N_ao * N_ao * N_ao) + (k * N_ao * N_ao) + (j * N_ao) + l];
-                    G(i, j) += this->D(k, l) * (J_ij - 0.5 * K_ik);
+                    for (size_t l = 0; l < N_ao; ++l)
+                    {
+                        double J_kl = this->Vee[(i * N_ao * N_ao * N_ao) + (j * N_ao * N_ao) + (k * N_ao) + l];
+                        double K_kl = this->Vee[(i * N_ao * N_ao * N_ao) + (k * N_ao * N_ao) + (j * N_ao) + l];
+                        G_ij += this->D(k, l) * (J_kl - 0.5 * K_kl);
+                    }
                 }
+                G(i, j) = G(j, i) = G_ij;
             }
         }
     }

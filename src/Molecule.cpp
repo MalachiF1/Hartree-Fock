@@ -89,6 +89,7 @@ double Molecule::nuclearRepulsion() const
 Eigen::MatrixXd Molecule::overlapMatrix() const
 {
     Eigen::MatrixXd S(basisFunctionCount, basisFunctionCount);
+#pragma omp parallel for collapse(2)
     for (size_t i = 0; i < basisFunctionCount; ++i)
     {
         for (size_t j = i; j < basisFunctionCount; ++j)
@@ -104,6 +105,7 @@ Eigen::MatrixXd Molecule::overlapMatrix() const
 Eigen::MatrixXd Molecule::kineticMatrix() const
 {
     Eigen::MatrixXd T(basisFunctionCount, basisFunctionCount);
+#pragma omp parallel for collapse(2)
     for (size_t i = 0; i < basisFunctionCount; ++i)
     {
         for (size_t j = i; j < basisFunctionCount; ++j)
@@ -120,6 +122,7 @@ Eigen::MatrixXd Molecule::nuclearAttractionMatrix() const
 {
     Eigen::MatrixXd V(basisFunctionCount, basisFunctionCount);
     V.setZero();
+#pragma omp parallel for collapse(2)
     for (size_t i = 0; i < basisFunctionCount; ++i)
     {
         for (size_t j = i; j < basisFunctionCount; ++j)
@@ -130,8 +133,7 @@ Eigen::MatrixXd Molecule::nuclearAttractionMatrix() const
                 v_ij += atom.atomicNumber
                       * AtomicOrbital::nuclearAttraction(atomicOrbitals[i], atomicOrbitals[j], atom.coords);
             }
-            V(i, j) = v_ij;
-            V(j, i) = v_ij;
+            V(i, j) = V(j, i) = v_ij;
         }
     }
     return V;
@@ -145,6 +147,7 @@ std::vector<double> Molecule::electronRepulsionTensor(double threshold) const
 
     // Pre-calculate Schwartz screening matrix
     Eigen::MatrixXd Q(N_ao, N_ao);
+#pragma omp parallel for collapse(2)
     for (size_t i = 0; i < N_ao; ++i)
     {
         for (size_t j = 0; j <= i; ++j)
@@ -162,7 +165,8 @@ std::vector<double> Molecule::electronRepulsionTensor(double threshold) const
         }
     }
 
-    // Main loop over AO quartets
+// Main loop over AO quartets
+#pragma omp parallel for collapse(2)
     for (size_t i = 0; i < N_ao; ++i)
     {
         for (size_t j = 0; j <= i; ++j)
