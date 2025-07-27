@@ -13,7 +13,7 @@ CXX = g++
 # -Wall -Wextra / -O3 -march=native -flto (also add -flto in LDFLAGS)
 
 # Compiler flags
-CXXFLAGS = -std=c++17 -g -Iinclude -Ieigen -fopenmp -Wall -Wextra
+CXXFLAGS = -std=c++17 -g -Iinclude -Ieigen -Inlohmann -fopenmp -Wall -Wextra
 
 ifeq ($(USE_BOOST), 1)
     CXXFLAGS += -DHAVE_BOOST

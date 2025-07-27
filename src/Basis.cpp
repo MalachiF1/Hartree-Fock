@@ -1,54 +1,11 @@
 #include "Basis.hpp"
 
-#include <cctype>
+#include <filesystem>
+#include <fstream>
+#include <json.hpp>
+#include <sstream>
 #include <stdexcept>
-
-const std::map<std::string, std::map<int, std::vector<Shell>>> Basis::basisSets = {
-    {"sto-3g",
-     {
-         {1, // Hydrogen
-          {{0, {3.425250914, 0.6239137298, 0.1688554040}, {0.1543289673, 0.5353281423, 0.4446345422}}}},
-         {8, // Oxygen
-          {
-              {0, {130.7093214, 23.80886605, 6.443608313}, {0.1543289673, 0.5353281423, 0.4446345422}},   // 1s
-              {0, {5.033151319, 1.169596125, 0.380389600}, {-0.09996722919, 0.3995128261, 0.7001154689}}, // 2s
-              {1, {5.033151319, 1.169596125, 0.380389600}, {0.1559162750, 0.6076837186, 0.3919573931}}    // 2p
-          }},
-         {9, // Fluorine
-          {
-              {0, {166.6791340, 30.36081233, 8.216820672}, {0.15432897, 0.53532814, 0.44463454}},          // 1s
-              {0, {6.464803249, 1.502281245, 0.4885884864}, {-0.09996722919, 0.3995128261, 0.7001154689}}, // 2s
-              {1, {6.464803249, 1.502281245, 0.4885884864}, {0.155916275, 0.6076837186, 0.3919573931}}     // 2p
-          }},
-     }},
-    {"6-31g",
-     {
-         {1,                                                                                           // Hydrogen
-          {{0, {18.73113696, 2.825394365, 0.6401216923}, {0.03349460434, 0.2347269535, 0.8137573261}}, // 1s
-           {0, {0.1612777588}, {1.0000000}}}},                                                         // 2s
-
-         {6, // carbon
-          {
-              {0,
-               {3047.524880, 457.3695180, 103.9486850, 29.21015530, 9.286662960, 3.163926960},
-               {0.001834737132, 0.01403732281, 0.06884262226, 0.2321844432, 0.4679413484, 0.3623119853}}, // 1s
-              {0, {7.868272350, 1.881288540, 0.5442492580}, {-0.1193324198, -0.1608541517, 1.143456438}}, // 2s
-              {1, {7.868272350, 1.881288540, 0.5442492580}, {0.06899906659, 0.3164239610, 0.7443082909}}, // 2p
-              {0, {0.1687144782}, {1.0}},                                                                 // 3S
-              {1, {0.1687144782}, {1.0}},                                                                 // 3
-          }},
-         {8, // Oxygen
-          {
-              {0,
-               {5484.671660, 825.2349460, 188.0469580, 52.96450000, 16.89757040, 5.799635340},
-               {0.001831074430, 0.01395017220, 0.06844507810, 0.2327143360, 0.4701928980, 0.3585208530}}, // 1s
-              {0, {15.53961625, 3.599933586, 1.013761750}, {-0.1107775495, -0.1480262627, 1.130767015}},  // 2s
-              {1, {15.53961625, 3.599933586, 1.013761750}, {0.07087426823, 0.3397528391, 0.7271585773}},  // 2p
-              {0, {0.2700058226}, {1.0}},                                                                 // 3s
-              {0, {0.2700058226}, {1.0}},                                                                 // 3p
-          }},
-     }},
-};
+#include <string>
 
 std::map<int, std::vector<Shell>> Basis::getBasis(const std::string& name, const std::vector<int>& elements)
 {
@@ -61,19 +18,73 @@ std::map<int, std::vector<Shell>> Basis::getBasis(const std::string& name, const
         [](unsigned char c) { return std::tolower(c); }
     );
 
-    if (basisSets.find(lowercaseName) == basisSets.end())
+    std::string basisPath = "basis_sets/" + lowercaseName + ".json";
+
+    // Check if the basis set exists
+    if (!std::filesystem::exists(basisPath))
     {
         throw std::runtime_error("Basis set '" + name + "' not found.");
     }
 
-    const auto& fullBasis = basisSets.at(lowercaseName);
-    std::map<int, std::vector<Shell>> resultBasis;
+    // Load the basis set from the JSON file
+    std::ifstream basisSetFile(basisPath);
+    std::stringstream buffer;
+    buffer << basisSetFile.rdbuf();
+    auto basisJson = nlohmann::json::parse(buffer.str());
 
-    for (int element : elements)
+    std::map<int, std::vector<Shell>> basisResult;
+
+    for (const auto& element : elements)
     {
-        if (fullBasis.count(element))
+        if (basisJson["elements"].contains(std::to_string(element)))
         {
-            resultBasis[element] = fullBasis.at(element);
+            for (const auto& shell : basisJson["elements"][std::to_string(element)]["electron_shells"])
+            {
+                for (size_t i = 0; i < shell["angular_momentum"].get<std::vector<int>>().size(); ++i)
+                {
+                    {
+                        // Create a new Shell object for each angular momentum
+                        Shell newShell;
+
+                        // parse anguar momentum
+                        newShell.angularMomentum = shell["angular_momentum"].get<std::vector<int>>()[i];
+
+                        // parse exponents
+                        std::vector<std::string> exponentsStrings = shell["exponents"].get<std::vector<std::string>>();
+                        std::vector<double> exponents;
+                        for (const auto& expStr : exponentsStrings)
+                        {
+                            try
+                            {
+                                exponents.push_back(std::stod(expStr));
+                            }
+                            catch (const std::invalid_argument& e)
+                            {
+                                throw std::runtime_error("Invalid exponent value: " + expStr);
+                            }
+                        }
+                        newShell.exponents = exponents;
+
+                        // parse coefficients
+                        std::vector<std::string>
+                            coefficientsStrings = shell["coefficients"].get<std::vector<std::vector<std::string>>>()[i];
+                        std::vector<double> coefficients;
+                        for (const auto& coeffStr : coefficientsStrings)
+                        {
+                            try
+                            {
+                                coefficients.push_back(std::stod(coeffStr));
+                            }
+                            catch (const std::invalid_argument& e)
+                            {
+                                throw std::runtime_error("Invalid coefficient value: " + coeffStr);
+                            }
+                        }
+                        newShell.coefficients = coefficients;
+                        basisResult[element].push_back(newShell);
+                    }
+                }
+            }
         }
         else
         {
@@ -82,5 +93,5 @@ std::map<int, std::vector<Shell>> Basis::getBasis(const std::string& name, const
             );
         }
     }
-    return resultBasis;
+    return basisResult;
 }
