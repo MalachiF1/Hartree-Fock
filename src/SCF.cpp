@@ -148,8 +148,8 @@ void SCF::buildFockMatrix()
                 {
                     for (size_t l = 0; l < N_ao; ++l)
                     {
-                        double J_kl = this->Vee[(i * N_ao * N_ao * N_ao) + (j * N_ao * N_ao) + (k * N_ao) + l];
-                        double K_kl = this->Vee[(i * N_ao * N_ao * N_ao) + (k * N_ao * N_ao) + (j * N_ao) + l];
+                        double J_kl = this->Vee(i, j, k, l);
+                        double K_kl = this->Vee(i, k, j, l);
                         G_ij += this->D(k, l) * (J_kl - 0.5 * K_kl);
                     }
                 }

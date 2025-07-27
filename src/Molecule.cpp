@@ -100,8 +100,7 @@ Eigen::MatrixXd Molecule::overlapMatrix() const
     {
         for (size_t j = i; j < basisFunctionCount; ++j)
         {
-            S(i, j) = AtomicOrbital::overlap(atomicOrbitals[i], atomicOrbitals[j]);
-            S(j, i) = S(i, j);
+            S(i, j) = S(j, i) = AtomicOrbital::overlap(atomicOrbitals[i], atomicOrbitals[j]);
         }
     }
     return S;
@@ -116,8 +115,7 @@ Eigen::MatrixXd Molecule::kineticMatrix() const
     {
         for (size_t j = i; j < basisFunctionCount; ++j)
         {
-            T(i, j) = AtomicOrbital::kinetic(atomicOrbitals[i], atomicOrbitals[j]);
-            T(j, i) = T(i, j);
+            T(i, j) = T(j, i) = AtomicOrbital::kinetic(atomicOrbitals[i], atomicOrbitals[j]);
         }
     }
     return T;
@@ -146,10 +144,10 @@ Eigen::MatrixXd Molecule::nuclearAttractionMatrix() const
 }
 
 
-std::vector<double> Molecule::electronRepulsionTensor(double threshold) const
+ElectronRepulsionTensor Molecule::electronRepulsionTensor(double threshold) const
 {
     size_t N_ao = basisFunctionCount;
-    std::vector<double> Vee(N_ao * N_ao * N_ao * N_ao, 0.0);
+    ElectronRepulsionTensor Vee(N_ao);
 
     // Pre-calculate Schwartz screening matrix
     Eigen::MatrixXd Q(N_ao, N_ao);
@@ -164,10 +162,8 @@ std::vector<double> Molecule::electronRepulsionTensor(double threshold) const
             Q(i, j) = Q(j, i) = std::sqrt(std::abs(integral));
 
             // We can set these elements in the tensor instead of calculating them again
-            Vee[(i * N_ao * N_ao * N_ao) + (j * N_ao * N_ao) + (i * N_ao) + j] = integral;
-            Vee[(j * N_ao * N_ao * N_ao) + (i * N_ao * N_ao) + (i * N_ao) + j] = integral;
-            Vee[(i * N_ao * N_ao * N_ao) + (j * N_ao * N_ao) + (j * N_ao) + i] = integral;
-            Vee[(j * N_ao * N_ao * N_ao) + (i * N_ao * N_ao) + (j * N_ao) + i] = integral;
+            // The ElectronRepulsionTensor class handles the symmetry
+            Vee(i, j, i, j) = integral;
         }
     }
 
@@ -204,14 +200,7 @@ std::vector<double> Molecule::electronRepulsionTensor(double threshold) const
                     );
 
                     // Store with 8-fold symmetry
-                    Vee[(i * N_ao * N_ao * N_ao) + (j * N_ao * N_ao) + (k * N_ao) + l] = integral;
-                    Vee[(j * N_ao * N_ao * N_ao) + (i * N_ao * N_ao) + (k * N_ao) + l] = integral;
-                    Vee[(i * N_ao * N_ao * N_ao) + (j * N_ao * N_ao) + (l * N_ao) + k] = integral;
-                    Vee[(j * N_ao * N_ao * N_ao) + (i * N_ao * N_ao) + (l * N_ao) + k] = integral;
-                    Vee[(k * N_ao * N_ao * N_ao) + (l * N_ao * N_ao) + (i * N_ao) + j] = integral;
-                    Vee[(l * N_ao * N_ao * N_ao) + (k * N_ao * N_ao) + (i * N_ao) + j] = integral;
-                    Vee[(k * N_ao * N_ao * N_ao) + (l * N_ao * N_ao) + (j * N_ao) + i] = integral;
-                    Vee[(l * N_ao * N_ao * N_ao) + (k * N_ao * N_ao) + (j * N_ao) + i] = integral;
+                    Vee(i, j, k, l) = integral;
                 }
             }
         }

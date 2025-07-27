@@ -6,6 +6,92 @@
 #include <string>
 #include <vector>
 
+
+/*
+ * Flattened 1D vector representing the electron repulsion tensor.
+ * We only store the unique elements (8-fold symmetry).
+ * Canonical indexing is paramnount (i >= j, k >= l).
+ */
+class ElectronRepulsionTensor : public std::vector<double>
+{
+  public:
+    // inheritance from std::vector<double> allows us to use the vector interface directly
+    using std::vector<double>::vector;
+
+    ElectronRepulsionTensor() = default;
+
+    /*
+     * Constructs an electron repulsion tensor for a given basis size.
+     * The tensor is initialized with zeros.
+     * @param basisSize The number of basis functions.
+     */
+    ElectronRepulsionTensor(size_t basisSize) : std::vector<double>(tensorSize(basisSize), 0.0) {}
+
+    /*
+     * overload the () operator to access the tensor elements (by reference, so you can set them as well).
+     */
+    double& operator()(size_t i, size_t j, size_t k, size_t l)
+    {
+        // if i < j or k < l, swap i and j or k and l to maintain canonical indexing
+        if (i < j || k < l)
+        {
+            if (i < j)
+                std::swap(i, j);
+            if (k < l)
+                std::swap(k, l);
+        }
+        // Calculate the index in the flattened vector
+        size_t big_I = (i * (i + 1) / 2) + j;
+        size_t big_K = (k * (k + 1) / 2) + l;
+        // if I < K, swap I and K to l to maintian canonical indexing
+        if (big_I < big_K)
+            std::swap(big_I, big_K);
+        // Calculate the index in the flattened vector
+        size_t index = (big_I * (big_I + 1) / 2) + big_K;
+        return std::vector<double>::operator[](index);
+    };
+
+    /*
+     * overload the () with const reference operator
+     */
+    double const& operator()(size_t i, size_t j, size_t k, size_t l) const
+    {
+        // if i < j or k < l, swap i and j or k and l to maintain canonical indexing
+        if (i < j || k < l)
+        {
+            if (i < j)
+                std::swap(i, j);
+            if (k < l)
+                std::swap(k, l);
+        }
+        // Calculate the index in the flattened vector
+        size_t big_I = (i * (i + 1) / 2) + j;
+        size_t big_K = (k * (k + 1) / 2) + l;
+        // if I < K, swap I and K to l to maintian canonical indexing
+        if (big_I < big_K)
+            std::swap(big_I, big_K);
+        // Calculate the index in the flattened vector
+        size_t index = (big_I * (big_I + 1) / 2) + big_K;
+        return std::vector<double>::operator[](index);
+    };
+
+  private:
+    /*
+     * Returns the size of the tensor for a given basis size.
+     * @param basisSize The number of basis functions.
+     * @return The size of the tensor
+     */
+    size_t tensorSize(size_t basisSize) const
+    {
+        // The number of unique pairs (i, j) where i >= j
+        size_t M = basisSize * (basisSize + 1) / 2;
+
+        // The number of unique quartets (i, j, k, l) where i >= j and k >= l
+        return M * (M + 1) / 2; // Total number of unique elements in the tensor
+    }
+};
+
+
 class Molecule
 {
   public:
@@ -51,7 +137,7 @@ class Molecule
      * @param threshold The Schwartz screening threshold below which integrals are considered negligible and set to zero.
      * @return A flattened 1D vector representing the electron repulsion tensor.
      */
-    std::vector<double> electronRepulsionTensor(double threshold = 1e-10) const;
+    ElectronRepulsionTensor electronRepulsionTensor(double threshold = 1e-10) const;
 
     // Getters for molecule properties
     const std::vector<AtomicOrbital>& getAtomicOrbitals() const { return atomicOrbitals; }

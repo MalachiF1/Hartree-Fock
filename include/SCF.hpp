@@ -40,7 +40,7 @@ class SCF
     Eigen::MatrixXd h;       // Core Hamiltonian (T+V)
     Eigen::MatrixXd S;       // Overlap matrix
     Eigen::MatrixXd X;       // Orthogonalization matrix S^(-1/2)
-    std::vector<double> Vee; // Two-electron repulsion integrals
+    ElectronRepulsionTensor Vee; // Two-electron repulsion integrals
 
     // SCF state variables that change during iterations.
     double electronicEnergy; // Electronic energy
