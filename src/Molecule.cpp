@@ -41,7 +41,13 @@ size_t Molecule::countElectrons() const
 void Molecule::buildBasis(const std::string& basisName)
 {
     std::vector<int> elements;
-    for (const auto& atom : geometry) { elements.push_back(atom.atomicNumber); }
+    for (const auto& atom : geometry)
+    {
+        if (std::find(elements.begin(), elements.end(), atom.atomicNumber) == elements.end())
+        {
+            elements.push_back(atom.atomicNumber);
+        }
+    }
 
     auto basisData = Basis::getBasis(basisName, elements);
 
