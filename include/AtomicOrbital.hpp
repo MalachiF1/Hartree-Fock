@@ -4,15 +4,23 @@
 
 #include <vector>
 
+/**
+ * @brief Represents an atomic orbital composed of cartesian primitive Gaussian functions.
+ *
+ * This class represents an atomic orbital, which is a linear combination of primitive Gaussian functions.
+ * An atomic orbital is defined by its center and a set of primitive Gaussians, each with its own exponent,
+ * contraction coefficient, and angular momentum numbers. This class contains methods to calculate
+ * various integrals involving atomic orbitals, such as overlap, kinetic energy, nuclear attraction,
+ * and electron-electron repulsion integrals.
+ */
 class AtomicOrbital
 {
   public:
-    const Vec3 center;
+    const Vec3 center; // center of the atomic orbital (the nucleus position on which the orbital is centered)
 
     AtomicOrbital(const Vec3& center, const std::vector<PrimitiveGaussian>& primitives);
 
     /**
-     * Returns a string representation of the atomic orbital.
      * @return A string containing the center and the primitive gaussians of the orbital.
      */
     std::string toString() const;
@@ -25,6 +33,7 @@ class AtomicOrbital
 
     /**
      * Calculates the overlap integral between two atomic orbitals.
+     *
      * @param ao1 The first atomic orbital.
      * @param ao2 The second atomic orbital.
      * @return The value of the overlap integral.
@@ -33,6 +42,7 @@ class AtomicOrbital
 
     /**
      * Calculates the kinetic energy integral between two atomic orbitals.
+     *
      * @param ao1 The first atomic orbital.
      * @param ao2 The second atomic orbital.
      * @return The value of the kinetic energy integral.
@@ -41,6 +51,7 @@ class AtomicOrbital
 
     /**
      * Calculates the kinetic energy integral between two atomic orbitals.
+     *
      * @param ao1 The first atomic orbital.
      * @param ao2 The second atomic orbital.
      * @param nucleusCoords The coordinates of the nucleus.
@@ -50,6 +61,7 @@ class AtomicOrbital
 
     /**
      * Calculates the electron-electron repulsion integral between four atomic orbitals.
+     *
      * @param ao1 The first atomic orbital.
      * @param ao2 The second atomic orbital.
      * @param ao3 The third atomic orbital.
@@ -62,7 +74,7 @@ class AtomicOrbital
 
   private:
     /**
-     * Helper function for calculating Hermite expansion coefficients.
+     * Helper function for calculating Hermite gaussians.
      * Used for the electron-nuclear attraction and electron-electron repulsion integrals.
      * This function is memoized to improve performance.
      *

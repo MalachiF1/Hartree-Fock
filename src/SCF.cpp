@@ -66,6 +66,7 @@ void SCF::run(
         double dE = std::abs(this->electronicEnergy - lastElectronicEnergy);
         double dD = (this->D - D_last).norm();
 
+        // Print the current iteration results.
         if (useDIIS)
         {
             this->printIteration(iteration + 1, dE, dD, diis_handler->getErrorNorm());
@@ -133,9 +134,10 @@ void SCF::computeInitialGuessDensity()
 
 void SCF::buildFockMatrix()
 {
-    size_t N_ao       = this->basisCount;
-    Eigen::MatrixXd G = Eigen::MatrixXd::Zero(N_ao, N_ao);
+    size_t N_ao = this->basisCount;
 
+    // Calculate the G matrix (the two-electron part of the Fock matrix).
+    Eigen::MatrixXd G = Eigen::MatrixXd::Zero(N_ao, N_ao);
 #pragma omp parallel for collapse(2)
     for (size_t i = 0; i < N_ao; ++i)
     {

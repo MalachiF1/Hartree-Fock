@@ -43,6 +43,7 @@ void Molecule::buildBasis(const std::string& basisName)
     std::vector<int> elements;
     for (const auto& atom : geometry)
     {
+        // Ensure that no duplicate atomic numbers are added to the elements vector.
         if (std::find(elements.begin(), elements.end(), atom.atomicNumber) == elements.end())
         {
             elements.push_back(atom.atomicNumber);
@@ -79,6 +80,8 @@ void Molecule::buildBasis(const std::string& basisName)
 
 double Molecule::nuclearRepulsion() const
 {
+    // The nuclear repulsion energy is calculated using the formula:
+    // E_NN = sum_{i < j} (Z_i * Z_j) / r_ij
     double energy = 0.0;
     for (size_t i = 0; i < geometry.size(); ++i)
     {
@@ -98,7 +101,7 @@ Eigen::MatrixXd Molecule::overlapMatrix() const
 #pragma omp parallel for collapse(2)
     for (size_t i = 0; i < basisFunctionCount; ++i)
     {
-        for (size_t j = i; j < basisFunctionCount; ++j)
+        for (size_t j = i; j < basisFunctionCount; ++j) // only compute upper triangle as S is symmetric
         {
             S(i, j) = S(j, i) = AtomicOrbital::overlap(atomicOrbitals[i], atomicOrbitals[j]);
         }
@@ -113,7 +116,7 @@ Eigen::MatrixXd Molecule::kineticMatrix() const
 #pragma omp parallel for collapse(2)
     for (size_t i = 0; i < basisFunctionCount; ++i)
     {
-        for (size_t j = i; j < basisFunctionCount; ++j)
+        for (size_t j = i; j < basisFunctionCount; ++j) // only compute upper triangle as T is symmetric
         {
             T(i, j) = T(j, i) = AtomicOrbital::kinetic(atomicOrbitals[i], atomicOrbitals[j]);
         }
@@ -129,7 +132,7 @@ Eigen::MatrixXd Molecule::nuclearAttractionMatrix() const
 #pragma omp parallel for collapse(2)
     for (size_t i = 0; i < basisFunctionCount; ++i)
     {
-        for (size_t j = i; j < basisFunctionCount; ++j)
+        for (size_t j = i; j < basisFunctionCount; ++j) // only compute upper triangle as V is symmetric
         {
             double v_ij = 0.0;
             for (const auto& atom : geometry)
@@ -161,7 +164,7 @@ ElectronRepulsionTensor Molecule::electronRepulsionTensor(double threshold) cons
             );
             Q(i, j) = Q(j, i) = std::sqrt(std::abs(integral));
 
-            // We can set these elements in the tensor instead of calculating them again
+            // We can set these elements in the tensor instead of calculating them again in the next loop.
             // The ElectronRepulsionTensor class handles the symmetry
             Vee(i, j, i, j) = integral;
         }
@@ -177,23 +180,17 @@ ElectronRepulsionTensor Molecule::electronRepulsionTensor(double threshold) cons
             {
                 for (size_t l = 0; l <= k; ++l)
                 {
-                    // Enforce quartet symmetry
+                    // no need to recalculate identical elements of the tensor (enforce quartet symmetry)
                     if ((i * (i + 1) / 2 + j) < (k * (k + 1) / 2 + l))
-                    {
                         continue;
-                    }
 
-                    // make sure we did not already calculate this integral in the previous loop
+                    // make sure we did not already calculate this integral in Schwartz screening loop
                     if ((i == k && j == l) || (i == l && j == k))
-                    {
                         continue;
-                    }
 
-                    // Schwartz screening at the AO level
+                    // apply Schwartz screening at the AO level
                     if (Q(i, j) * Q(k, l) < threshold)
-                    {
                         continue;
-                    }
 
                     double integral = AtomicOrbital::electronRepulsion(
                         atomicOrbitals[i], atomicOrbitals[j], atomicOrbitals[k], atomicOrbitals[l]

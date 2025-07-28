@@ -4,7 +4,15 @@
 
 #include <string>
 
-// Represents a single primitive Gaussian function.
+/**
+ * @brief Represents a cartesian primitive Gaussian function
+ *
+ * This class represents a cartesian primitive Gaussian: $ N C x^l y^m z^n e^{-\alpha (r - A)^2} $
+ * where: N is the normalization constant, C is the contraction coefficient, l, m, n are the angular
+ * momentum numbers in the x, y, z directions respectively, $\alpha$ is the exponent, and $A$ is the
+ * center of the Gaussian. This class is used to store the parameters of the primitive Gaussians of
+ * an atomic orbital in the AtomicOrbital class.
+ */
 class PrimitiveGaussian
 {
   public:
@@ -24,7 +32,8 @@ class PrimitiveGaussian
 
   private:
     /**
-     * Computes the normalization constant of a primitive gaussian.
+     * Computes the normalization constant of a primitive gaussian according to the formula:
+     * $ N = (2 * alpha / pi)^(3/4) * (4 * alpha)^(l + m + n) / sqrt((2l - 1)!! * (2m - 1)!! * (2n - 1)!!) $
      *
      * @param exponent The exponent of the gaussian
      * @param l Angular momentum number in the x direction

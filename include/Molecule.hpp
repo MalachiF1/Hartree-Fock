@@ -7,28 +7,38 @@
 #include <vector>
 
 
-/*
+/**
+ * @brief Represents the electron repulsion tensor for a molecule.
+ *
  * Flattened 1D vector representing the electron repulsion tensor.
- * We only store the unique elements (8-fold symmetry).
- * Canonical indexing is paramnount (i >= j, k >= l).
+ * We only store the unique elements (8-fold symmetry). The tensor can be indexed normaly as ElectronRepulsionTensor(i, j, k, l).
+ * This class stores the electron repulsion integrals in canonical indexing order: (i >= j, k >= l). However, it allows calling
+ * the elements with any indices, and it will automatically swap the indices to maintain the canonical indexing.
  */
 class ElectronRepulsionTensor : public std::vector<double>
 {
   public:
-    // inheritance from std::vector<double> allows us to use the vector interface directly
-    using std::vector<double>::vector;
+    using std::vector<double>::vector; // inheritance from std::vector<double> allows us to use the vector interface directly
 
     ElectronRepulsionTensor() = default;
 
-    /*
+    /**
      * Constructs an electron repulsion tensor for a given basis size.
-     * The tensor is initialized with zeros.
+     * The tensor is initialized with zeros, and is of the same size as the number of unique elements.
+     *
      * @param basisSize The number of basis functions.
      */
     ElectronRepulsionTensor(size_t basisSize) : std::vector<double>(tensorSize(basisSize), 0.0) {}
 
-    /*
-     * overload the () operator to access the tensor elements (by reference, so you can set them as well).
+    /**
+     * Overload the () operator to access the tensor elements (by reference, so you can set them as well).
+     * If i < j or k < l, it will swap i and j or k and l to maintain canonical indexing.
+     *
+     * @param i The first index
+     * @param j The second index
+     * @param k The third index
+     * @param l The fourth index
+     * @return A reference to the element at (i, j, k, l) in the tensor.
      */
     double& operator()(size_t i, size_t j, size_t k, size_t l)
     {
@@ -40,19 +50,29 @@ class ElectronRepulsionTensor : public std::vector<double>
             if (k < l)
                 std::swap(k, l);
         }
+
         // Calculate the index in the flattened vector
         size_t big_I = (i * (i + 1) / 2) + j;
         size_t big_K = (k * (k + 1) / 2) + l;
+
         // if I < K, swap I and K to l to maintian canonical indexing
         if (big_I < big_K)
             std::swap(big_I, big_K);
+
         // Calculate the index in the flattened vector
         size_t index = (big_I * (big_I + 1) / 2) + big_K;
         return std::vector<double>::operator[](index);
     };
 
-    /*
-     * overload the () with const reference operator
+    /**
+     * Overload the () operator to access the tensor elements (by reference, so you can set them as well).
+     * If i < j or k < l, it will swap i and j or k and l to maintain canonical indexing.
+     *
+     * @param i The first index
+     * @param j The second index
+     * @param k The third index
+     * @param l The fourth index
+     * @return A reference to the element at (i, j, k, l) in the tensor.
      */
     double const& operator()(size_t i, size_t j, size_t k, size_t l) const
     {
@@ -64,20 +84,24 @@ class ElectronRepulsionTensor : public std::vector<double>
             if (k < l)
                 std::swap(k, l);
         }
+
         // Calculate the index in the flattened vector
         size_t big_I = (i * (i + 1) / 2) + j;
         size_t big_K = (k * (k + 1) / 2) + l;
+
         // if I < K, swap I and K to l to maintian canonical indexing
         if (big_I < big_K)
             std::swap(big_I, big_K);
+
         // Calculate the index in the flattened vector
         size_t index = (big_I * (big_I + 1) / 2) + big_K;
         return std::vector<double>::operator[](index);
     };
 
   private:
-    /*
-     * Returns the size of the tensor for a given basis size.
+    /**
+     * Returns the size of the tensor (number of unique elements) for a given basis size.
+     *
      * @param basisSize The number of basis functions.
      * @return The size of the tensor
      */
@@ -92,50 +116,53 @@ class ElectronRepulsionTensor : public std::vector<double>
 };
 
 
+/**
+ * @brief Represents a molecule built from atomic orbital basis functions (which are themselves built by cartesian primitive gaussians).
+ *
+ * This class encapsulates the properties of a molecule, including its charge, multiplicity, basis set, and geometry.
+ * It provides methods to compute molecular properties such as the overlap, kinetic energy, nuclear attraction matrices,
+ * the electron repulsion tensor, and the nuclear-nuclear repulsion energy.
+ *
+ */
 class Molecule
 {
   public:
     Molecule(int charge, int multiplicity, const std::string& basisName, const std::vector<Atom>& geometry);
 
-    /*
-     * Returns a string representation of the molecule.
+    /**
      * @return A string containing the charge, multiplicity, number of electrons, number of basis functions, and geometry.
      */
     std::string toString() const;
 
-    /*
-     * Calculates the total nuclear-nuclear repulsion energy.
+    /**
      * @return The total nuclear repulsion energy.
      */
     double nuclearRepulsion() const;
 
-    /*
-     * Computes the overlap matrix of the molecule.
+    /**
      * @return The overlap matrix S as an Eigen::MatrixXd.
      */
     Eigen::MatrixXd overlapMatrix() const;
 
-    /*
-     * Computes the kinetic energy matrix of the molecule.
+    /**
      * @return The kinetic energy matrix T as an Eigen::MatrixXd.
      */
 
-    /*
-     * Computes the kinetic energy matrix of the molecule.
+    /**
      * @return The kinetic energy matrix T as an Eigen::MatrixXd.
      */
     Eigen::MatrixXd kineticMatrix() const;
 
-    /*
-     * Computes the nuclear attraction matrix of the molecule.
+    /**
      * @return The nuclear attraction matrix V as an Eigen::MatrixXd.
      */
     Eigen::MatrixXd nuclearAttractionMatrix() const;
 
-    /*
+    /**
      * Computes the electron repulsion integral tensor for the molecule.
+     *
      * @param threshold The Schwartz screening threshold below which integrals are considered negligible and set to zero.
-     * @return A flattened 1D vector representing the electron repulsion tensor.
+     * @return A ElectronRepulsionTensor object containing the electron repulsion integrals.
      */
     ElectronRepulsionTensor electronRepulsionTensor(double threshold = 1e-10) const;
 
@@ -150,15 +177,17 @@ class Molecule
   private:
     size_t basisFunctionCount; // number of atomic orbitals in the molecule
 
-    /* Counts the number of electrons in the molecule based on the geometry and charge
+    /**
+     * Counts the number of electrons in the molecule based on the geometry and charge
      * @return The total number of electrons in the molecule.
      */
     size_t countElectrons() const;
 
-    /*
+    /**
      * Builds the atomic orbitals for the molecule based on the provided basis set.
+     *
      * @param basisName The name of the basis set to use (case insensitive).
-     * Throws std::runtime_error if the basis set is not found.
+     * @Throws std::runtime_error if the basis set is not found.
      */
     void buildBasis(const std::string& basisName);
 

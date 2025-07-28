@@ -6,11 +6,16 @@
 #include <tuple>
 #include <unordered_map>
 
-// Memoization caches for the recursive integral helper functions.
-// The hash function for tuples is specialized in the std namespace (see Utils.hpp).
-// It is thread local for thread safety, as these functions are called in parallel in the electron repulsion integral calculation.
 namespace
 {
+/**
+ * Memoization caches for the recursive integral helper functions.
+ * These caches store the results of previously computed integrals to avoid redundant calculations.
+ * The keys are tuples containing the parameters of the integral functions.
+ * The values are the computed integral results.
+ * These caches are thread-local to ensure thread safety, as the integral functions are called in parallel 
+ * during electron repulsion integral calculations.
+ */
 thread_local std::unordered_map<std::tuple<int, int, int, double, double, double>, double> E_cache;
 thread_local std::unordered_map<std::tuple<int, int, int, int, double, double, double, double, double>, double> R_cache;
 } // namespace

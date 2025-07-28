@@ -6,6 +6,13 @@
 #include <string>
 #include <vector>
 
+/**
+ * @brief Helper class to retrieve basis sets for molecular calculations.
+ *
+ * This class provides a method to retrieve a basis set for a list of elements.
+ * The basis set is defined in the `basis_set` directory, using the Basis Set Exchange JSON format.
+ * The file should be named as `<name>.json` (in lower-case).
+ */
 class Basis
 {
   public:

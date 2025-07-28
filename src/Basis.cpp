@@ -32,8 +32,8 @@ std::map<int, std::vector<Shell>> Basis::getBasis(const std::string& name, const
     buffer << basisSetFile.rdbuf();
     auto basisJson = nlohmann::json::parse(buffer.str());
 
+    // store the basis set data in a map where the key is the atomic number and the value is a vector of Shell objects
     std::map<int, std::vector<Shell>> basisResult;
-
     for (const auto& element : elements)
     {
         if (basisJson["elements"].contains(std::to_string(element)))
