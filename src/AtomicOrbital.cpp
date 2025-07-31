@@ -188,16 +188,16 @@ double AtomicOrbital::electronRepulsion(
                         {
                             for (int v1 = 0; v1 <= p1.n + p2.n; ++v1)
                             {
+                                double Ex1 = E(t1, p1.l, p2.l, Q_ab.x(), p1.exponent, p2.exponent);
+                                double Ey1 = E(u1, p1.m, p2.m, Q_ab.y(), p1.exponent, p2.exponent);
+                                double Ez1 = E(v1, p1.n, p2.n, Q_ab.z(), p1.exponent, p2.exponent);
+
                                 for (int t2 = 0; t2 <= p3.l + p4.l; ++t2)
                                 {
                                     for (int u2 = 0; u2 <= p3.m + p4.m; ++u2)
                                     {
                                         for (int v2 = 0; v2 <= p3.n + p4.n; ++v2)
                                         {
-                                            double Ex1 = E(t1, p1.l, p2.l, Q_ab.x(), p1.exponent, p2.exponent);
-                                            double Ey1 = E(u1, p1.m, p2.m, Q_ab.y(), p1.exponent, p2.exponent);
-                                            double Ez1 = E(v1, p1.n, p2.n, Q_ab.z(), p1.exponent, p2.exponent);
-
                                             double Ex2 = E(t2, p3.l, p4.l, Q_cd.x(), p3.exponent, p4.exponent);
                                             double Ey2 = E(u2, p3.m, p4.m, Q_cd.y(), p3.exponent, p4.exponent);
                                             double Ez2 = E(v2, p3.n, p4.n, Q_cd.z(), p3.exponent, p4.exponent);

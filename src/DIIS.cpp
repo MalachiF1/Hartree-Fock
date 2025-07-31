@@ -5,11 +5,8 @@ DIIS::DIIS(size_t maxSize) : maxSize(maxSize) {}
 
 void DIIS::update(const Eigen::MatrixXd& F, const Eigen::MatrixXd& D, const Eigen::MatrixXd& S, const Eigen::MatrixXd& X)
 {
-    // Calculate the DIIS error vector: e = FDS - SDF
-    Eigen::MatrixXd error = X.transpose() * (F * D * S - S * D * F) * X;
-
     // Add the new error vector and Fock matrix to the history.
-    errorVectors.emplace_back(error);
+    errorVectors.emplace_back(X.transpose() * (F * D * S - S * D * F) * X);
     fockMatricesOrtho.emplace_back(X.transpose() * F * X);
 
     // If the storage exceeds the maximum size, remove the oldest entry.

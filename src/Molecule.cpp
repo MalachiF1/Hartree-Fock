@@ -127,8 +127,7 @@ Eigen::MatrixXd Molecule::kineticMatrix() const
 
 Eigen::MatrixXd Molecule::nuclearAttractionMatrix() const
 {
-    Eigen::MatrixXd V(basisFunctionCount, basisFunctionCount);
-    V.setZero();
+    Eigen::MatrixXd V = Eigen::MatrixXd::Zero(basisFunctionCount, basisFunctionCount);
 #pragma omp parallel for collapse(2)
     for (size_t i = 0; i < basisFunctionCount; ++i)
     {
@@ -162,7 +161,7 @@ ElectronRepulsionTensor Molecule::electronRepulsionTensor(double threshold) cons
             double integral = AtomicOrbital::electronRepulsion(
                 atomicOrbitals[i], atomicOrbitals[j], atomicOrbitals[i], atomicOrbitals[j]
             );
-            Q(i, j) = Q(j, i) = std::sqrt(std::abs(integral));
+            Q(i, j) = Q(j, i) = std::sqrt(integral);
 
             // We can set these elements in the tensor instead of calculating them again in the next loop.
             // The ElectronRepulsionTensor class handles the symmetry

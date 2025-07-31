@@ -63,6 +63,11 @@ struct Atom
  */
 struct Shell
 {
+    Shell() = default;
+    Shell(int angularMomentum, const std::vector<double>& exponents, const std::vector<double>& coefficients) :
+        angularMomentum(angularMomentum), exponents(exponents), coefficients(coefficients)
+    {
+    }
     int angularMomentum;
     std::vector<double> exponents;
     std::vector<double> coefficients;

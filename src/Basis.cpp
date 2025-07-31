@@ -1,5 +1,6 @@
 #include "Basis.hpp"
 
+#include <charconv>
 #include <filesystem>
 #include <fstream>
 #include <json.hpp>
@@ -17,6 +18,14 @@ std::map<int, std::vector<Shell>> Basis::getBasis(const std::string& name, const
         lowercaseName.begin(),
         [](unsigned char c) { return std::tolower(c); }
     );
+
+    // replace '*' with '_st_'
+    size_t startPos = 0;
+    while ((startPos = lowercaseName.find("*", startPos)) != std::string::npos)
+    {
+        lowercaseName.replace(startPos, 1, "_st_");
+        startPos += 4;
+    }
 
     std::string basisPath = "basis_sets/" + lowercaseName + ".json";
 
@@ -40,49 +49,50 @@ std::map<int, std::vector<Shell>> Basis::getBasis(const std::string& name, const
         {
             for (const auto& shell : basisJson["elements"][std::to_string(element)]["electron_shells"])
             {
+                // Only support cartesian GTOs for now
+                if (shell["function_type"] != "gto" && shell["function_type"] != "gto_cartesian")
+                {
+                    throw std::runtime_error(
+                        "Unsupported function type '" + shell["function_type"].get<std::string>()
+                        + "' for element with atomic number " + std::to_string(element) + " in basis set '" + name + "'."
+                    );
+                }
+
                 for (size_t i = 0; i < shell["angular_momentum"].get<std::vector<int>>().size(); ++i)
                 {
+                    int angularMomentum = shell["angular_momentum"].get<std::vector<int>>()[i];
+
+                    // parse exponents
+                    std::vector<std::string> exponentsStrings = shell["exponents"].get<std::vector<std::string>>();
+                    std::vector<double> exponents;
+                    exponents.reserve(exponentsStrings.size());
+                    for (const auto& expStr : exponentsStrings)
                     {
-                        // Create a new Shell object for each angular momentum
-                        Shell newShell;
-
-                        // parse anguar momentum
-                        newShell.angularMomentum = shell["angular_momentum"].get<std::vector<int>>()[i];
-
-                        // parse exponents
-                        std::vector<std::string> exponentsStrings = shell["exponents"].get<std::vector<std::string>>();
-                        std::vector<double> exponents;
-                        for (const auto& expStr : exponentsStrings)
+                        double value;
+                        auto [ptr, ec] = std::from_chars(expStr.data(), expStr.data() + expStr.size(), value);
+                        if (ec != std::errc())
                         {
-                            try
-                            {
-                                exponents.push_back(std::stod(expStr));
-                            }
-                            catch (const std::invalid_argument& e)
-                            {
-                                throw std::runtime_error("Invalid exponent value: " + expStr);
-                            }
+                            throw std::runtime_error("Invalid exponent value: " + expStr);
                         }
-                        newShell.exponents = exponents;
-
-                        // parse coefficients
-                        std::vector<std::string>
-                            coefficientsStrings = shell["coefficients"].get<std::vector<std::vector<std::string>>>()[i];
-                        std::vector<double> coefficients;
-                        for (const auto& coeffStr : coefficientsStrings)
-                        {
-                            try
-                            {
-                                coefficients.push_back(std::stod(coeffStr));
-                            }
-                            catch (const std::invalid_argument& e)
-                            {
-                                throw std::runtime_error("Invalid coefficient value: " + coeffStr);
-                            }
-                        }
-                        newShell.coefficients = coefficients;
-                        basisResult[element].push_back(newShell);
+                        exponents.push_back(value);
                     }
+
+                    // parse coefficients
+                    std::vector<std::string> coefficientsStrings = shell["coefficients"]
+                                                                       .get<std::vector<std::vector<std::string>>>()[i];
+                    std::vector<double> coefficients;
+                    coefficients.reserve(coefficientsStrings.size());
+                    for (const auto& coeffStr : coefficientsStrings)
+                    {
+                        double value;
+                        auto [ptr, ec] = std::from_chars(coeffStr.data(), coeffStr.data() + coeffStr.size(), value);
+                        if (ec != std::errc())
+                        {
+                            throw std::runtime_error("Invalid coefficient value: " + coeffStr);
+                        }
+                        coefficients.push_back(value);
+                    }
+                    basisResult[element].emplace_back(angularMomentum, exponents, coefficients);
                 }
             }
         }
