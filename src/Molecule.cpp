@@ -203,3 +203,23 @@ ElectronRepulsionTensor Molecule::electronRepulsionTensor(double threshold) cons
     }
     return Vee;
 }
+
+Eigen::MatrixXd Molecule::schwartzScreeningMatrix() const
+{
+    size_t N_ao = basisFunctionCount;
+
+    // Pre-calculate Schwartz screening matrix
+    Eigen::MatrixXd Q(N_ao, N_ao);
+#pragma omp parallel for collapse(2)
+    for (size_t i = 0; i < N_ao; ++i)
+    {
+        for (size_t j = 0; j <= i; ++j)
+        {
+            double integral = AtomicOrbital::electronRepulsion(
+                atomicOrbitals[i], atomicOrbitals[j], atomicOrbitals[i], atomicOrbitals[j]
+            );
+            Q(i, j) = Q(j, i) = std::sqrt(std::abs(integral));
+        }
+    }
+    return Q;
+}

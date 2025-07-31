@@ -36,7 +36,9 @@ class SCF
         bool useDIIS             = true,
         size_t DIISmaxSize       = 8,
         unsigned DIISstart       = 1,
-        double DIISErrorTol      = 1e-8
+        double DIISErrorTol      = 1e-8,
+        bool direct              = false,
+        double densityThreshold  = 1e-10
     );
 
   private:
@@ -52,6 +54,7 @@ class SCF
     Eigen::MatrixXd h;           // Core Hamiltonian (T+V)
     Eigen::MatrixXd S;           // Overlap matrix
     Eigen::MatrixXd X;           // Orthogonalization matrix S^(-1/2)
+    Eigen::MatrixXd Q;           // Schwartz screening matrix (used in direct method)
     ElectronRepulsionTensor Vee; // Two-electron repulsion integrals
 
     // SCF state variables that change during iterations.
@@ -71,10 +74,10 @@ class SCF
      * @note This method is called once when starting the SCF calculation.
      * @param schwartz_threshold The threshold for Schwartz screening of two-electron integrals.
      */
-    void initialize(double schwartzThreshold = 1e-10);
+    void initialize(double schwartzThreshold, bool direct);
 
     /**
-     * Computes the initial guess for the density matrix and Fock matrix. This is currently done using the core Hamiltonian (T + V).
+     * Computes the initial guess for the density matrix. This is currently done using the core Hamiltonian (T + V).
      *
      * @note This method is called once at the beginning of the SCF iterations.
      */
@@ -84,6 +87,7 @@ class SCF
      * Builds the Fock matrix using the current density matrix and two-electron integrals.
      */
     void buildFockMatrix();
+    void buildFockMatrix(double schwartzThreshold, double densityThreshold); // overload for direct method
 
     /**
      * Diagonalizes the Fock matrix to obtain the molecular orbitals and updates the density matrix and coefficient matrix.

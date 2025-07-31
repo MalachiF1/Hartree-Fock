@@ -166,6 +166,17 @@ class Molecule
      */
     ElectronRepulsionTensor electronRepulsionTensor(double threshold = 1e-10) const;
 
+    /**
+     * Computes the Schwartz screening matrix for the molecule.
+     * This matrix is used to screen out negligible electron repulsion integrals.
+     * This method is used by the SCF class when building the Fock matrix in the direct method.
+     * The electronRepulsionTensor method also calcultes and uses the Schwartz screening matrix,
+     * but doesn't store it (so it can set the elements in the tensor directly).
+     *
+     * @return An Eigen::MatrixXd representing the Schwartz screening matrix.
+     */
+    Eigen::MatrixXd schwartzScreeningMatrix() const;
+
     // Getters for molecule properties
     const std::vector<AtomicOrbital>& getAtomicOrbitals() const { return atomicOrbitals; }
     size_t getBasisFunctionCount() const { return basisFunctionCount; }
