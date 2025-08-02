@@ -182,92 +182,90 @@ void SCF::buildFockMatrix(double schwartzThreshold, double densityThreshold)
 #pragma omp parallel
     {
         Eigen::MatrixXd G_private = Eigen::MatrixXd::Zero(N_ao, N_ao); // Thread-local G matrix to void data races
-#pragma omp for collapse(2)
+#pragma omp for collapse(4) schedule(dynamic, 1)
         for (size_t i = 0; i < N_ao; ++i)
         {
             for (size_t j = 0; j < N_ao; ++j)
             {
-                if (j <= i)
+                for (size_t k = 0; k < N_ao; ++k)
                 {
-                    for (size_t k = 0; k < N_ao; ++k)
+                    for (size_t l = 0; l < N_ao; ++l)
                     {
-                        for (size_t l = 0; l <= k; ++l)
+                        // Only calculate unique integrals
+                        if (j > i || l > k || ((i * (i + 1) / 2 + j) < (k * (k + 1) / 2 + l)))
+                            continue;
+
+                        // Schwartz screening
+                        if (Q(i, j) * Q(k, l) < schwartzThreshold)
+                            continue;
+
+                        // Density screening
+                        if (std::abs(this->D(k, l)) < densityThreshold && std::abs(this->D(i, j)) < densityThreshold
+                            && std::abs(this->D(i, k)) < densityThreshold && std::abs(this->D(i, l)) < densityThreshold
+                            && std::abs(this->D(j, k)) < densityThreshold && std::abs(this->D(j, l)) < densityThreshold)
+                            continue;
+
+
+                        double eri = AtomicOrbital::electronRepulsion(AOs[i], AOs[j], AOs[k], AOs[l]);
+
+                        if (i == j && j == k && k == l) // (ii|ii)
                         {
-                            if ((i * (i + 1) / 2 + j) < (k * (k + 1) / 2 + l))
-                                continue;
-
-                            // Schwartz screening
-                            if (Q(i, j) * Q(k, l) < schwartzThreshold)
-                                continue;
-
-                            // Density screening
-                            if (std::abs(this->D(k, l)) < densityThreshold && std::abs(this->D(i, j)) < densityThreshold
-                                && std::abs(this->D(i, k)) < densityThreshold && std::abs(this->D(i, l)) < densityThreshold
-                                && std::abs(this->D(j, k)) < densityThreshold && std::abs(this->D(j, l)) < densityThreshold)
-                                continue;
-
-
-                            double eri = AtomicOrbital::electronRepulsion(AOs[i], AOs[j], AOs[k], AOs[l]);
-
-                            if (i == j && j == k && k == l) // (ii|ii)
-                            {
-                                G_private(i, i) += 0.5 * this->D(i, i) * eri;
-                            }
-                            else if (i == j && j == k) // (ii|il)
-                            {
-                                G_private(i, i) += this->D(i, l) * eri;
-                                G_private(i, l) += 0.5 * this->D(i, i) * eri;
-                                G_private(l, i) += 0.5 * this->D(i, i) * eri;
-                            }
-                            else if (i == j && k == l) // (ii|kk)
-                            {
-                                G_private(i, i) += this->D(k, k) * eri;
-                                G_private(k, k) += this->D(i, i) * eri;
-                                G_private(i, k) -= 0.5 * this->D(k, i) * eri;
-                                G_private(k, i) -= 0.5 * this->D(k, i) * eri;
-                            }
-                            else if (i == k && j == l) // (ij|ij)
-                            {
-                                G_private(i, j) += 1.5 * this->D(i, j) * eri;
-                                G_private(j, i) += 1.5 * this->D(i, j) * eri;
-                                G_private(j, j) -= 0.5 * this->D(i, i) * eri;
-                                G_private(i, i) -= 0.5 * this->D(j, j) * eri;
-                            }
-                            else if (i == j) // (ii|kl)
-                            {
-                                G_private(i, i) += 2 * this->D(k, l) * eri;
-                                G_private(k, l) += this->D(i, i) * eri;
-                                G_private(l, k) += this->D(i, i) * eri;
-                                G_private(i, l) -= 0.5 * this->D(i, k) * eri;
-                                G_private(l, i) -= 0.5 * this->D(i, k) * eri;
-                                G_private(i, k) -= 0.5 * this->D(i, l) * eri;
-                                G_private(k, i) -= 0.5 * this->D(i, l) * eri;
-                            }
-                            else if (k == l) // (ij|kk)
-                            {
-                                G_private(k, k) += 2 * this->D(i, j) * eri;
-                                G_private(i, j) += this->D(k, k) * eri;
-                                G_private(j, i) += this->D(k, k) * eri;
-                                G_private(i, k) -= 0.5 * this->D(k, j) * eri;
-                                G_private(k, i) -= 0.5 * this->D(k, j) * eri;
-                                G_private(j, k) -= 0.5 * this->D(i, k) * eri;
-                                G_private(k, j) -= 0.5 * this->D(i, k) * eri;
-                            }
-                            else // (ij|kl)
-                            {
-                                G_private(i, j) += 2 * this->D(k, l) * eri;
-                                G_private(j, i) += 2 * this->D(k, l) * eri;
-                                G_private(k, l) += 2 * this->D(i, j) * eri;
-                                G_private(l, k) += 2 * this->D(i, j) * eri;
-                                G_private(i, l) -= 0.5 * this->D(k, j) * eri;
-                                G_private(l, i) -= 0.5 * this->D(k, j) * eri;
-                                G_private(j, l) -= 0.5 * this->D(i, k) * eri;
-                                G_private(l, j) -= 0.5 * this->D(i, k) * eri;
-                                G_private(i, k) -= 0.5 * this->D(j, l) * eri;
-                                G_private(k, i) -= 0.5 * this->D(j, l) * eri;
-                                G_private(j, k) -= 0.5 * this->D(i, l) * eri;
-                                G_private(k, j) -= 0.5 * this->D(i, l) * eri;
-                            }
+                            G_private(i, i) += 0.5 * this->D(i, i) * eri;
+                        }
+                        else if (i == j && j == k) // (ii|il)
+                        {
+                            G_private(i, i) += this->D(i, l) * eri;
+                            G_private(i, l) += 0.5 * this->D(i, i) * eri;
+                            G_private(l, i) += 0.5 * this->D(i, i) * eri;
+                        }
+                        else if (i == j && k == l) // (ii|kk)
+                        {
+                            G_private(i, i) += this->D(k, k) * eri;
+                            G_private(k, k) += this->D(i, i) * eri;
+                            G_private(i, k) -= 0.5 * this->D(k, i) * eri;
+                            G_private(k, i) -= 0.5 * this->D(k, i) * eri;
+                        }
+                        else if (i == k && j == l) // (ij|ij)
+                        {
+                            G_private(i, j) += 1.5 * this->D(i, j) * eri;
+                            G_private(j, i) += 1.5 * this->D(i, j) * eri;
+                            G_private(j, j) -= 0.5 * this->D(i, i) * eri;
+                            G_private(i, i) -= 0.5 * this->D(j, j) * eri;
+                        }
+                        else if (i == j) // (ii|kl)
+                        {
+                            G_private(i, i) += 2 * this->D(k, l) * eri;
+                            G_private(k, l) += this->D(i, i) * eri;
+                            G_private(l, k) += this->D(i, i) * eri;
+                            G_private(i, l) -= 0.5 * this->D(i, k) * eri;
+                            G_private(l, i) -= 0.5 * this->D(i, k) * eri;
+                            G_private(i, k) -= 0.5 * this->D(i, l) * eri;
+                            G_private(k, i) -= 0.5 * this->D(i, l) * eri;
+                        }
+                        else if (k == l) // (ij|kk)
+                        {
+                            G_private(k, k) += 2 * this->D(i, j) * eri;
+                            G_private(i, j) += this->D(k, k) * eri;
+                            G_private(j, i) += this->D(k, k) * eri;
+                            G_private(i, k) -= 0.5 * this->D(k, j) * eri;
+                            G_private(k, i) -= 0.5 * this->D(k, j) * eri;
+                            G_private(j, k) -= 0.5 * this->D(i, k) * eri;
+                            G_private(k, j) -= 0.5 * this->D(i, k) * eri;
+                        }
+                        else // (ij|kl)
+                        {
+                            G_private(i, j) += 2 * this->D(k, l) * eri;
+                            G_private(j, i) += 2 * this->D(k, l) * eri;
+                            G_private(k, l) += 2 * this->D(i, j) * eri;
+                            G_private(l, k) += 2 * this->D(i, j) * eri;
+                            G_private(i, l) -= 0.5 * this->D(k, j) * eri;
+                            G_private(l, i) -= 0.5 * this->D(k, j) * eri;
+                            G_private(j, l) -= 0.5 * this->D(i, k) * eri;
+                            G_private(l, j) -= 0.5 * this->D(i, k) * eri;
+                            G_private(i, k) -= 0.5 * this->D(j, l) * eri;
+                            G_private(k, i) -= 0.5 * this->D(j, l) * eri;
+                            G_private(j, k) -= 0.5 * this->D(i, l) * eri;
+                            G_private(k, j) -= 0.5 * this->D(i, l) * eri;
                         }
                     }
                 }

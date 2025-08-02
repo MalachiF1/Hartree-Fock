@@ -169,18 +169,17 @@ ElectronRepulsionTensor Molecule::electronRepulsionTensor(double threshold) cons
         }
     }
 
-// Main loop over AO quartets
-#pragma omp parallel for collapse(2)
+#pragma omp parallel for collapse(4) schedule(dynamic, 1)
     for (size_t i = 0; i < N_ao; ++i)
     {
-        for (size_t j = 0; j <= i; ++j)
+        for (size_t j = 0; j < N_ao; ++j)
         {
             for (size_t k = 0; k < N_ao; ++k)
             {
-                for (size_t l = 0; l <= k; ++l)
+                for (size_t l = 0; l < N_ao; ++l)
                 {
                     // no need to recalculate identical elements of the tensor (enforce quartet symmetry)
-                    if ((i * (i + 1) / 2 + j) < (k * (k + 1) / 2 + l))
+                    if (j > i || l > k || (i * (i + 1) / 2 + j) < (k * (k + 1) / 2 + l))
                         continue;
 
                     // make sure we did not already calculate this integral in Schwartz screening loop
@@ -218,7 +217,7 @@ Eigen::MatrixXd Molecule::schwartzScreeningMatrix() const
             double integral = AtomicOrbital::electronRepulsion(
                 atomicOrbitals[i], atomicOrbitals[j], atomicOrbitals[i], atomicOrbitals[j]
             );
-            Q(i, j) = Q(j, i) = std::sqrt(std::abs(integral));
+            Q(i, j) = Q(j, i) = std::sqrt(integral);
         }
     }
     return Q;
