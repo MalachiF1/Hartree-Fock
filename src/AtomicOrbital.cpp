@@ -3,23 +3,7 @@
 #include "Utils.hpp"
 
 #include <cmath>
-#include <tuple>
-#include <unordered_map>
-
-namespace
-{
-/**
- * Memoization caches for the recursive integral helper functions.
- * These caches store the results of previously computed integrals to avoid redundant calculations.
- * The keys are tuples containing the parameters of the integral functions.
- * The values are the computed integral results.
- * These caches are thread-local to ensure thread safety, as the integral functions are called in parallel 
- * during electron repulsion integral calculations.
- */
-thread_local std::unordered_map<std::tuple<int, int, int, double, double, double>, double> E_cache;
-thread_local std::unordered_map<std::tuple<int, int, int, int, double, double, double, double, double>, double> R_cache;
-} // namespace
-
+#include <iostream>
 
 AtomicOrbital::AtomicOrbital(const Vec3& center, const std::vector<PrimitiveGaussian>& primitives) :
     center(center), primitives(primitives)
@@ -234,13 +218,6 @@ double AtomicOrbital::E(int i, int l1, int l2, double Q, double exponentA, doubl
         return 1.0;
     }
 
-    // check if the result is already cached
-    auto key = std::make_tuple(i, l1, l2, Q, exponentA, exponentB);
-    if (E_cache.count(key))
-    {
-        return E_cache.at(key);
-    }
-
     double p = exponentA + exponentB;
     double q = (exponentA * exponentB) / p;
 
@@ -260,8 +237,6 @@ double AtomicOrbital::E(int i, int l1, int l2, double Q, double exponentA, doubl
                + ((i + 1) * E(i + 1, l1, l2 - 1, Q, exponentA, exponentB));
     }
 
-    // store the result in the cache
-    E_cache[key] = result;
     return result;
 }
 
@@ -271,12 +246,6 @@ double AtomicOrbital::R(int t, int u, int v, int n, double p, const Vec3& PC, do
     {
         // out of bounds
         return 0.0;
-    }
-
-    auto key = std::make_tuple(t, u, v, n, p, PC.x(), PC.y(), PC.z(), T);
-    if (R_cache.count(key))
-    {
-        return R_cache.at(key);
     }
 
     double result = 0.0;
@@ -298,6 +267,5 @@ double AtomicOrbital::R(int t, int u, int v, int n, double p, const Vec3& PC, do
         result = (v - 1) * R(t, u, v - 2, n + 1, p, PC, T) + PC.z() * R(t, u, v - 1, n + 1, p, PC, T);
     }
 
-    R_cache[key] = result;
     return result;
 }

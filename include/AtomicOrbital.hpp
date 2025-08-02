@@ -72,11 +72,11 @@ class AtomicOrbital
         const AtomicOrbital& ao1, const AtomicOrbital& ao2, const AtomicOrbital& ao3, const AtomicOrbital& ao4
     );
 
+
   private:
     /**
      * Helper function for calculating Hermite gaussians.
      * Used for the electron-nuclear attraction and electron-electron repulsion integrals.
-     * This function is memoized to improve performance.
      *
      * @param i The index of the Hermite polynomial.
      * @param l1 The angular momentum quantum number of the first orbital.
@@ -89,7 +89,6 @@ class AtomicOrbital
     /**
      * Helper function for calculating the auxiliary integrals R_tuv.
      * Used for the electron-nuclear attraction and electron-electron repulsion integrals.
-     * This function is memoized to improve performance.
      *
      * @param t The combined angular momentum index for the x-dimension.
      * @param u The combined angular momentum index for the y-dimension.
