@@ -5,48 +5,6 @@
 
 #include <Eigen/Dense>
 
-/*
- * In the std namespace, we specialize the `hash` struct for tuples.
- *This is used for hashing results of E and R auxiliary functions
- * in the AtomicOrbital class, in an unordered_map.
- */
-namespace std
-{
-template<typename... Args>
-struct hash<tuple<Args...>>
-{
-    size_t operator()(const tuple<Args...>& t) const
-    {
-        size_t seed = 0;       // Start with a seed of 0
-        hash_combine(seed, t); // Combine the hash of each element into the seed
-        return seed;
-    }
-  private:
-    // This is the core logic for combining hashes
-    template<typename T, size_t I>
-    void hash_combine_impl(size_t& seed, const T& t) const
-    {
-        // 1. Get the hash of the current tuple element (get<I>(t))
-        // 2. Add a "magic number" (derived from the golden ratio) and bit-shifted versions ofthe seed
-        // 3. XOR the result back into the seed
-        seed ^= hash<typename tuple_element<I, T>::type>()(get<I>(t)) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-    }
-
-    // These helpers apply the above logic to each element of the tuple
-    template<typename T, size_t... I>
-    void hash_combine(size_t& seed, const T& t, index_sequence<I...>) const
-    {
-        (hash_combine_impl<T, I>(seed, t), ...);
-    }
-    template<typename... Ts>
-    void hash_combine(size_t& seed, const tuple<Ts...>& t) const
-    {
-        hash_combine(seed, t, make_index_sequence<sizeof...(Ts)>());
-    }
-};
-}; // namespace std
-
-
 using Vec3 = Eigen::Vector3d;
 
 /**

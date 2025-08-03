@@ -142,21 +142,55 @@ double AtomicOrbital::electronRepulsion(
     {
         for (const auto& p2 : ao2.primitives)
         {
+            double p_ab = p1.exponent + p2.exponent;
+            Vec3 P_ab   = (p1.exponent * p1.coords + p2.exponent * p2.coords) / p_ab;
+            double q_ab = (p1.exponent * p2.exponent) / p_ab;
+            Vec3 Q_ab   = p1.coords - p2.coords;
+
+            // precompute E values so we don't recompute them in the nested loops
+            std::vector<double> Ex1_values(p1.l + p2.l + 1);
+            std::vector<double> Ey1_values(p1.m + p2.m + 1);
+            std::vector<double> Ez1_values(p1.n + p2.n + 1);
+
+            for (int t1 = 0; t1 <= p1.l + p2.l; ++t1)
+            {
+                Ex1_values[t1] = E(t1, p1.l, p2.l, Q_ab.x(), p1.exponent, p2.exponent);
+            }
+            for (int u1 = 0; u1 <= p1.m + p2.m; ++u1)
+            {
+                Ey1_values[u1] = E(u1, p1.m, p2.m, Q_ab.y(), p1.exponent, p2.exponent);
+            }
+            for (int v1 = 0; v1 <= p1.n + p2.n; ++v1)
+            {
+                Ez1_values[v1] = E(v1, p1.n, p2.n, Q_ab.z(), p1.exponent, p2.exponent);
+            }
+
             for (const auto& p3 : ao3.primitives)
             {
                 for (const auto& p4 : ao4.primitives)
                 {
-                    double p_ab = p1.exponent + p2.exponent;
+
                     double p_cd = p3.exponent + p4.exponent;
-
-                    Vec3 P_ab = (p1.exponent * p1.coords + p2.exponent * p2.coords) / p_ab;
-                    Vec3 P_cd = (p3.exponent * p3.coords + p4.exponent * p4.coords) / p_cd;
-
-                    double q_ab = (p1.exponent * p2.exponent) / p_ab;
+                    Vec3 P_cd   = (p3.exponent * p3.coords + p4.exponent * p4.coords) / p_cd;
                     double q_cd = (p3.exponent * p4.exponent) / p_cd;
+                    Vec3 Q_cd   = p3.coords - p4.coords;
 
-                    Vec3 Q_ab = p1.coords - p2.coords;
-                    Vec3 Q_cd = p3.coords - p4.coords;
+                    std::vector<double> Ex2_values(p3.l + p4.l + 1);
+                    std::vector<double> Ey2_values(p3.m + p4.m + 1);
+                    std::vector<double> Ez2_values(p3.n + p4.n + 1);
+
+                    for (int t2 = 0; t2 <= p3.l + p4.l; ++t2)
+                    {
+                        Ex2_values[t2] = E(t2, p3.l, p4.l, Q_cd.x(), p3.exponent, p4.exponent);
+                    }
+                    for (int u2 = 0; u2 <= p3.m + p4.m; ++u2)
+                    {
+                        Ey2_values[u2] = E(u2, p3.m, p4.m, Q_cd.y(), p3.exponent, p4.exponent);
+                    }
+                    for (int v2 = 0; v2 <= p3.n + p4.n; ++v2)
+                    {
+                        Ez2_values[v2] = E(v2, p3.n, p4.n, Q_cd.z(), p3.exponent, p4.exponent);
+                    }
 
                     double delta_eri = (p_ab * p_cd) / (p_ab + p_cd);
                     double T         = delta_eri * (P_ab - P_cd).squaredNorm();
@@ -168,23 +202,23 @@ double AtomicOrbital::electronRepulsion(
                     double sum = 0.0;
                     for (int t1 = 0; t1 <= p1.l + p2.l; ++t1)
                     {
+                        double Ex1 = Ex1_values[t1];
                         for (int u1 = 0; u1 <= p1.m + p2.m; ++u1)
                         {
+                            double Ey1 = Ey1_values[u1];
                             for (int v1 = 0; v1 <= p1.n + p2.n; ++v1)
                             {
-                                double Ex1 = E(t1, p1.l, p2.l, Q_ab.x(), p1.exponent, p2.exponent);
-                                double Ey1 = E(u1, p1.m, p2.m, Q_ab.y(), p1.exponent, p2.exponent);
-                                double Ez1 = E(v1, p1.n, p2.n, Q_ab.z(), p1.exponent, p2.exponent);
+                                double Ez1 = Ez1_values[v1];
 
                                 for (int t2 = 0; t2 <= p3.l + p4.l; ++t2)
                                 {
+                                    double Ex2 = Ex2_values[t2];
                                     for (int u2 = 0; u2 <= p3.m + p4.m; ++u2)
                                     {
+                                        double Ey2 = Ey2_values[u2];
                                         for (int v2 = 0; v2 <= p3.n + p4.n; ++v2)
                                         {
-                                            double Ex2 = E(t2, p3.l, p4.l, Q_cd.x(), p3.exponent, p4.exponent);
-                                            double Ey2 = E(u2, p3.m, p4.m, Q_cd.y(), p3.exponent, p4.exponent);
-                                            double Ez2 = E(v2, p3.n, p4.n, Q_cd.z(), p3.exponent, p4.exponent);
+                                            double Ez2 = Ez2_values[v2];
 
                                             double R_val = R(t1 + t2, u1 + u2, v1 + v2, 0, delta_eri, P_ab - P_cd, T);
 

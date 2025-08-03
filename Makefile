@@ -1,11 +1,5 @@
 # Makefile for the C++ Hartree-Fock Program
 
-# --- Build Configuration ---
-# Set to 1 to use the Boost library for the Boys function.
-# Requires the Boost development libraries to be installed.
-USE_BOOST = 1
-# --- End Configuration ---
-
 # Compiler
 CXX = g++
 
@@ -13,11 +7,7 @@ CXX = g++
 # -Wall -Wextra / -O3 -march=native -flto (also add -flto in LDFLAGS)
 
 # Compiler flags
-CXXFLAGS = -std=c++17 -g -Iinclude -Ieigen -Inlohmann -fopenmp -Wall -Wextra
-
-ifeq ($(USE_BOOST), 1)
-    CXXFLAGS += -DHAVE_BOOST
-endif
+CXXFLAGS = -std=c++17 -Iinclude -Ieigen -Inlohmann -fopenmp -O3 -march=native -pg
 
 # Linker flags (e.g., for linking external libraries)
 # link OpenBLAS statically
