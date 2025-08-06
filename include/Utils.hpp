@@ -4,6 +4,7 @@
 #define EIGEN_USE_LAPACK
 
 #include <Eigen/Dense>
+#include <unordered_map>
 
 using Vec3 = Eigen::Vector3d;
 
@@ -15,6 +16,13 @@ struct Atom
     int atomicNumber;
     Vec3 coords;
 };
+
+namespace Utils
+{
+extern const std::unordered_map<int, double> atomicMasses;
+extern const std::unordered_map<unsigned, std::string> atomicNumberToName;
+extern const std::unordered_map<std::string, unsigned> nameToAtomicNumber;
+} // namespace Utils
 
 /**
  * Struct to hold shell information from a basis set
