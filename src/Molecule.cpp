@@ -1,17 +1,41 @@
 #include "Molecule.hpp"
 
 #include "Basis.hpp"
+#include "Symmetry.hpp"
+#include "Utils.hpp"
 
 #include <cstddef>
+#include <cstdlib>
 #include <iomanip>
 #include <iostream>
 #include <sstream>
 
 Molecule::Molecule(int charge, int multiplicity, const std::string& basisName, const std::vector<Atom>& geometry) :
-    charge(charge), multiplicity(multiplicity), geometry(geometry), electronCount(countElectrons())
+    charge(charge), multiplicity(multiplicity), electronCount(countElectrons())
 {
     buildBasis(basisName);
     this->basisFunctionCount = atomicOrbitals.size();
+
+    auto [principalMoments, principalAxes] = Symmetry::diagonalizeInertiaTensor(geometry);
+    this->geometry                         = Symmetry::translateAndRotate(geometry, principalAxes);
+
+    std::vector<std::vector<size_t>> SEAIndeces = Symmetry::findSEAGroups(this->geometry, 1e-5);
+
+    bool hasInvertion      = Symmetry::hasInvertion(this->geometry, 1e-5);
+    auto properRotations   = Symmetry::findProperRotations(this->geometry, SEAIndeces, 1e-5);
+    auto reflectionPlanes  = Symmetry::findReflectionPlanes(this->geometry, SEAIndeces, 1e-5);
+    auto improperRotations = Symmetry::findImproperRotations(this->geometry, properRotations, reflectionPlanes, 1e-5);
+
+    std::vector<SymmetryOperation> operations;
+    operations.reserve(properRotations.size() + reflectionPlanes.size() + improperRotations.size() + 1);
+    if (hasInvertion)
+        operations.emplace_back(SymmetryOperation::i, 0, Vec3(0.0, 0.0, 0.0));
+
+    std::copy(properRotations.begin(), properRotations.end(), std::back_inserter(operations));
+    std::copy(reflectionPlanes.begin(), reflectionPlanes.end(), std::back_inserter(operations));
+    std::copy(improperRotations.begin(), improperRotations.end(), std::back_inserter(operations));
+
+    this->pointGroup = Symmetry::classifyPointGroup(operations, principalMoments, 1e-4);
 }
 
 std::string Molecule::toString() const
@@ -20,13 +44,14 @@ std::string Molecule::toString() const
     ss << "Molecule with charge " << charge << " and multiplicity " << multiplicity << ":\n";
     ss << "Number of electrons: " << electronCount << "\n";
     ss << "Number of basis functions: " << basisFunctionCount << "\n";
-    ss << "Geometry:\n";
+    ss << "Geometry (atom, x, y, z):\n";
     ss << std::fixed << std::setprecision(8);
     for (const auto& atom : geometry)
     {
-        ss << "\tAtomic number: " << atom.atomicNumber << ", Coordinates: (" << atom.coords.x() << ", "
-           << atom.coords.y() << ", " << atom.coords.z() << ")\n";
+        ss << "\t" << Utils::atomicNumberToName.at(atom.atomicNumber) << "\t" << atom.coords.x() << "\t"
+           << atom.coords.y() << "\t" << atom.coords.z() << "\n";
     }
+    ss << "Point group: " << pointGroup.toString() << "\n";
     return ss.str();
 }
 

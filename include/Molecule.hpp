@@ -1,6 +1,7 @@
 #pragma once
 
 #include "AtomicOrbital.hpp"
+#include "Symmetry.hpp"
 #include "Utils.hpp"
 
 #include <string>
@@ -32,7 +33,7 @@ class ElectronRepulsionTensor : public std::vector<double>
 
     /**
      * Overload the () operator to access the tensor elements (by reference, so you can set them as well).
-     * If i < j or k < l, it will swap i and j or k and l to maintain canonical indexing.
+     * Indices are swaped automatically to maintain canonical indexing.
      *
      * @param i The first index
      * @param j The second index
@@ -66,7 +67,7 @@ class ElectronRepulsionTensor : public std::vector<double>
 
     /**
      * Overload the () operator to access the tensor elements (by reference, so you can set them as well).
-     * If i < j or k < l, it will swap i and j or k and l to maintain canonical indexing.
+     * Indices are swaped automatically to maintain canonical indexing.
      *
      * @param i The first index
      * @param j The second index
@@ -202,9 +203,10 @@ class Molecule
      */
     void buildBasis(const std::string& basisName);
 
-    const int charge;                          // charge of the molecule
-    const int multiplicity;                    // multiplicity of the molecule (2S + 1)
-    const std::vector<Atom> geometry;          // geometry of the molecule, containing atomic numbers and coordinates
-    const size_t electronCount;                // total number of electrons in the molecule
-    std::vector<AtomicOrbital> atomicOrbitals; // vector of atomic orbitals built from the geometry and basis set
+    const int charge;
+    const int multiplicity;
+    std::vector<Atom> geometry;
+    const size_t electronCount;
+    std::vector<AtomicOrbital> atomicOrbitals;
+    PointGroup pointGroup;
 };

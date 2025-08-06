@@ -13,7 +13,7 @@ using Vec3 = Eigen::Vector3d;
  */
 struct Atom
 {
-    int atomicNumber;
+    unsigned atomicNumber;
     Vec3 coords;
 };
 
