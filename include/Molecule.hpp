@@ -128,7 +128,8 @@ class ElectronRepulsionTensor : public std::vector<double>
 class Molecule
 {
   public:
-    Molecule(int charge, int multiplicity, const std::string& basisName, const std::vector<Atom>& geometry);
+    Molecule(int charge, int multiplicity, const std::string& basisName, const std::vector<Atom>& geometry, double symmetryTolerance = 1e-5);
+
 
     /**
      * @return A string containing the charge, multiplicity, number of electrons, number of basis functions, and geometry.

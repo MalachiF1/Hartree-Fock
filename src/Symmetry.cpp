@@ -1,35 +1,75 @@
 #include "Symmetry.hpp"
 
+#include <iostream>
+#include <numeric>
 #include <sstream>
 
-SymmetryOperation::SymmetryOperation(SymmetryType type, size_t order, const Vec3& axis) :
-    type(type), order(order), axis(axis)
+SymmetryOperation::SymmetryOperation(
+    SymmetryType type, size_t order, const Vec3& axis, const Eigen::Matrix3d& matrix, size_t power
+) :
+    type(type), order(order), axis(axis), matrix(matrix), power(power)
 {
 }
 
 std::string SymmetryOperation::toString() const
 {
     std::string typeStr;
+    std::string orderStr = std::to_string(order);
+    std::string powerStr = std::to_string(power);
     switch (type)
     {
-        case Cn: typeStr = "Cn"; break;
-        case sigma: typeStr = "sigma"; break;
+        case Cn: typeStr = "C" + orderStr; break;
+        case Cn_power: typeStr = "C" + orderStr + "^" + powerStr; break;
+        case sigma: typeStr = "σ"; break;
         case i: typeStr = "i"; break;
-        case Sn: typeStr = "Sn"; break;
+        case Sn: typeStr = "S" + orderStr; break;
+        case Sn_power: typeStr = "S" + orderStr + "^" + powerStr; break;
+        case E: typeStr = "E"; break;
     }
 
     std::stringstream ss;
-    ss << typeStr << " (order: " << order << ", axis: [" << axis.x() << ", " << axis.y() << ", " << axis.z() << "])";
+    if (type == E)
+    {
+        ss << "E (Identity operation)";
+        return ss.str();
+    }
+    if (type == i)
+    {
+        ss << "i (Inversion operation)";
+        return ss.str();
+    }
+    if (type == sigma)
+    {
+        ss << typeStr << ", normal: [" << axis.x() << ", " << axis.y() << ", " << axis.z() << "]";
+        return ss.str();
+    }
+    ss << typeStr << ", axis: [" << axis.x() << ", " << axis.y() << ", " << axis.z() << "]";
     return ss.str();
 }
 
-PointGroup::PointGroup(PointGroupClass pointGroupClass, size_t order) : pointGroupClass(pointGroupClass), order(order)
+PointGroup::PointGroup() : pointGroupClass(C1), n(0), symmetryOperations({}), order(0) {}
+
+PointGroup::PointGroup(PointGroupClass pointGroupClass, size_t n, const std::vector<SymmetryOperation>& symmetryOperations) :
+    pointGroupClass(pointGroupClass), n(n), symmetryOperations(symmetryOperations), order(symmetryOperations.size())
 {
+    bool hasIdentityOperation = false;
+    for (const auto& op : symmetryOperations)
+    {
+        if (op.type == SymmetryOperation::E)
+        {
+            hasIdentityOperation = true;
+            break;
+        }
+    }
+    if (!hasIdentityOperation)
+    {
+        this->symmetryOperations.emplace_back(SymmetryOperation::E, 0, Vec3(0, 0, 0), Eigen::Matrix3d::Identity());
+    }
 }
 
 std::string PointGroup::toString() const
 {
-    std::string n = std::to_string(order);
+    std::string n_str = std::to_string(n);
     switch (pointGroupClass)
     {
         case Dinfh: return "D∞h";
@@ -41,15 +81,15 @@ std::string PointGroup::toString() const
         case T: return "T";
         case Td: return "Td";
         case Th: return "Th";
-        case Dn: return "D" + n;
-        case Dnh: return "D" + n + "h";
-        case Dnd: return "D" + n + "d";
-        case Cn: return "C" + n;
-        case Cnh: return "C" + n + "h";
-        case Cnv: return "C" + n + "v";
+        case Dn: return "D" + n_str;
+        case Dnh: return "D" + n_str + "h";
+        case Dnd: return "D" + n_str + "d";
+        case Cn: return "C" + n_str;
+        case Cnh: return "C" + n_str + "h";
+        case Cnv: return "C" + n_str + "v";
         case Cs: return "Cs";
         case Ci: return "Ci";
-        case S2n: return "S" + std::to_string(this->order * 2);
+        case S2n: return "S" + std::to_string(this->n * 2);
         case C1: return "C1";
         default: return "Unknown point group";
     }
@@ -92,7 +132,7 @@ std::pair<Vec3, Eigen::Matrix3d> diagonalizeInertiaTensor(const std::vector<Atom
 }
 
 
-std::vector<Atom> translateAndRotate(const std::vector<Atom>& geometry, const Eigen::Matrix3d& principalAxes)
+std::vector<Atom> translateAndRotate(const std::vector<Atom>& geometry, const Eigen::Matrix3d& principalAxes, double tol)
 {
     // Find center of mass
     Vec3 centerOfMass = Eigen::Vector3d::Zero();
@@ -112,8 +152,38 @@ std::vector<Atom> translateAndRotate(const std::vector<Atom>& geometry, const Ei
     auto R = principalAxes.transpose(); // rotation matrix
     for (auto& atom : newGeometry) { atom.coords = R * atom.coords; }
 
+    // find principal rotation axes (must be x, y or z axis after the previous transformations)
+    std::vector<Vec3> candidateAxes = {{1.0, 0.0, 0.0}, {0.0, 1.0, 0.0}, {0.0, 0.0, 1.0}};
+    Vec3 principalAxis              = {0, 0, 0};
+    size_t principalOrder           = 1;
+    for (const auto& axis : candidateAxes)
+    {
+        for (size_t order = principalOrder; order <= newGeometry.size(); ++order)
+        {
+            double angle                   = 2.0 * M_PI / order;
+            Eigen::Matrix3d rotationMatrix = createRotationMatrix(axis, angle);
+
+            if (isSymmetryOperation(newGeometry, rotationMatrix, tol))
+            {
+                principalAxis  = axis;
+                principalOrder = order;
+            }
+        }
+    }
+    if (principalOrder > 1)
+    {
+        // Rotate the geometry to align with the principal rotation axis
+        auto rotationAxis = principalAxis.cross(Vec3(0, 0, 1)).normalized();
+        if (rotationAxis.norm() > tol) // If the rotation axis is not already aligned with the z-axis
+        {
+            Eigen::Matrix3d rotationMatrix = createRotationMatrix(rotationAxis, 0.5 * M_PI);
+            for (auto& atom : newGeometry) { atom.coords = rotationMatrix * atom.coords; }
+        }
+    }
+
     return newGeometry;
 }
+
 
 std::vector<std::vector<size_t>> findSEAGroups(const std::vector<Atom>& geometry, double tol)
 {
@@ -281,6 +351,7 @@ bool areMoleculesSuperimposable(const std::vector<Atom>& geometry1, const std::v
     return true;
 }
 
+
 bool isSymmetryOperation(const std::vector<Atom>& geometry, const Eigen::Matrix3d& operation, double tol)
 {
     std::vector<Atom> transformedGeometry;
@@ -298,10 +369,12 @@ bool isSymmetryOperation(const std::vector<Atom>& geometry, const Eigen::Matrix3
 }
 
 
-bool hasInvertion(const std::vector<Atom>& geometry, double tol)
+std::vector<SymmetryOperation> findInvertion(const std::vector<Atom>& geometry, double tol)
 {
     Eigen::Matrix3d inversionMatrix = -Eigen::Matrix3d::Identity();
-    return isSymmetryOperation(geometry, inversionMatrix, tol);
+    if (isSymmetryOperation(geometry, inversionMatrix, tol))
+        return {SymmetryOperation(SymmetryOperation::i, 0, Vec3(0.0, 0.0, 0.0), inversionMatrix)};
+    return {};
 }
 
 // anonymous namespace for helper functions
@@ -329,6 +402,7 @@ void addUniqueVector(std::vector<Vec3>& vecList, const Vec3& vec, double tol)
 
 } // namespace
 
+
 std::vector<SymmetryOperation> findProperRotations(
     const std::vector<Atom>& geometry, const std::vector<std::vector<size_t>>& SEAIndecies, double tol
 )
@@ -355,8 +429,22 @@ std::vector<SymmetryOperation> findProperRotations(
             {
                 // axis going between the two atoms
                 addUniqueVector(candidateAxes, geometry[group[i]].coords + geometry[group[j]].coords, tol);
-                // axis from cross product of the two atoms
-                addUniqueVector(candidateAxes, geometry[group[i]].coords.cross(geometry[group[j]].coords), tol);
+
+                if (group.size() > 3)
+                {
+                    for (size_t k = j + 1; k < group.size(); ++k)
+                    {
+                        // check if the three atoms form an equilateral triangle
+                        double d_ij = (geometry[group[i]].coords - geometry[group[j]].coords).norm();
+                        double d_jk = (geometry[group[j]].coords - geometry[group[k]].coords).norm();
+                        double d_ki = (geometry[group[k]].coords - geometry[group[i]].coords).norm();
+                        if (std::abs(d_ij - d_jk) < tol && std::abs(d_jk - d_ki) < tol)
+                        {
+                            // axis that passes through the center of the triangle
+                            addUniqueVector(candidateAxes, geometry[i].coords + geometry[j].coords + geometry[k].coords, tol);
+                        }
+                    }
+                }
             }
         }
     }
@@ -365,14 +453,25 @@ std::vector<SymmetryOperation> findProperRotations(
     std::vector<SymmetryOperation> symmetryOperations;
     for (const auto& axis : candidateAxes)
     {
-        for (size_t order = 2; order <= geometry.size(); ++order)
+        for (size_t order = 2; order < geometry.size(); ++order)
         {
             double angle                   = 2.0 * M_PI / order;
             Eigen::Matrix3d rotationMatrix = createRotationMatrix(axis, angle);
 
             if (isSymmetryOperation(geometry, rotationMatrix, tol))
             {
-                symmetryOperations.emplace_back(SymmetryOperation::Cn, order, axis);
+                symmetryOperations.emplace_back(SymmetryOperation::Cn, order, axis, rotationMatrix);
+                for (size_t i = 2; i < order; ++i)
+                {
+                    if (order % i == 0)
+                        continue;
+                    if ((std::gcd(order, i) != 1 && order % std::gcd(order, i) == 0))
+                        continue;
+
+                    symmetryOperations.emplace_back(
+                        SymmetryOperation::Cn_power, order / std::gcd(order, i), axis, i * rotationMatrix, i / std::gcd(order, i)
+                    );
+                }
             }
         }
     }
@@ -427,12 +526,11 @@ std::vector<SymmetryOperation> findReflectionPlanes(
     std::vector<SymmetryOperation> symmetryOperations;
     for (const auto& normal : candidateNormals)
     {
-        // Check for proper rotations
-        Eigen::Matrix3d rotationMatrix = createReflectionMatrix(normal);
+        Eigen::Matrix3d reflectionMatrix = createReflectionMatrix(normal);
 
-        if (isSymmetryOperation(geometry, rotationMatrix, tol))
+        if (isSymmetryOperation(geometry, reflectionMatrix, tol))
         {
-            symmetryOperations.emplace_back(SymmetryOperation::sigma, 0, normal);
+            symmetryOperations.emplace_back(SymmetryOperation::sigma, 0, normal, reflectionMatrix);
         }
     }
 
@@ -441,36 +539,77 @@ std::vector<SymmetryOperation> findReflectionPlanes(
 
 
 std::vector<SymmetryOperation> findImproperRotations(
-    const std::vector<Atom>& geometry,
-    const std::vector<SymmetryOperation>& properRotations,
-    const std::vector<SymmetryOperation>& reflectionPlanes,
-    double tol
+    const std::vector<Atom>& geometry, const std::vector<std::vector<size_t>>& SEAIndecies, double tol
 )
 {
-    if (properRotations.empty() || reflectionPlanes.empty())
-        return {};
+    std::vector<Vec3> candidateAxes;
+
+    // add principle axes as candidates, geometry is assumed to be aligned with principal axes.
+    addUniqueVector(candidateAxes, {1.0, 0.0, 0.0}, tol);
+    addUniqueVector(candidateAxes, {0.0, 1.0, 0.0}, tol);
+    addUniqueVector(candidateAxes, {0.0, 0.0, 1.0}, tol);
+
+    // add axes from origin to each atom
+    for (const auto& atom : geometry) { addUniqueVector(candidateAxes, atom.coords, tol); }
+
+    // add axes between each pair of symmetrically equivalent atoms
+    for (const auto& group : SEAIndecies)
+    {
+        if (group.size() < 2)
+            continue;
+
+        for (size_t i = 0; i < group.size(); ++i)
+        {
+            for (size_t j = i + 1; j < group.size(); ++j)
+            {
+                // axis going between the two atoms
+                addUniqueVector(candidateAxes, geometry[group[i]].coords + geometry[group[j]].coords, tol);
+                // axis from cross product of the two atoms
+                addUniqueVector(candidateAxes, geometry[group[i]].coords.cross(geometry[group[j]].coords), tol);
+                if (group.size() > 3)
+                {
+                    for (size_t k = j + 1; k < group.size(); ++k)
+                    {
+                        // check if the three atoms form an equilateral triangle
+                        double d_ij = (geometry[group[i]].coords - geometry[group[j]].coords).norm();
+                        double d_jk = (geometry[group[j]].coords - geometry[group[k]].coords).norm();
+                        double d_ki = (geometry[group[k]].coords - geometry[group[i]].coords).norm();
+                        if (std::abs(d_ij - d_jk) < tol && std::abs(d_jk - d_ki) < tol)
+                        {
+                            // axis that passes through the center of the triangle
+                            addUniqueVector(candidateAxes, geometry[i].coords + geometry[j].coords + geometry[k].coords, tol);
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     std::vector<SymmetryOperation> symmetryOperations;
-    for (const auto& rotation : properRotations)
+    for (const auto& axis : candidateAxes)
     {
-        const auto& axis = rotation.axis;
-        size_t order     = rotation.order;
-        if (order <= 2)
-            continue; // We don't return sigma (S1) of i (S2) operations
-
-        double angle                           = 2.0 * M_PI / order;
-        Eigen::Matrix3d rotationMatrix         = createRotationMatrix(axis, angle);
-        Eigen::Matrix3d reflectionMatrix       = createReflectionMatrix(axis);
-        Eigen::Matrix3d improperRotationMatrix = reflectionMatrix * rotationMatrix;
-
-        if (isSymmetryOperation(geometry, improperRotationMatrix, tol))
+        for (size_t order = 3; order < geometry.size(); ++order)
         {
-            // Find the corresponding reflection plane
-            for (const auto& reflection : reflectionPlanes)
+            double angle                           = 2.0 * M_PI / order;
+            Eigen::Matrix3d rotationMatrix         = createRotationMatrix(axis, angle);
+            Eigen::Matrix3d reflectionMatrix       = createReflectionMatrix(axis);
+            Eigen::Matrix3d improperRotationMatrix = reflectionMatrix * rotationMatrix;
+
+            if (isSymmetryOperation(geometry, improperRotationMatrix, tol))
             {
-                if (areColinear(reflection.axis, axis, tol))
+                symmetryOperations.emplace_back(SymmetryOperation::Sn, order, axis, improperRotationMatrix);
+                for (size_t i = 3; i < order; ++i)
                 {
-                    symmetryOperations.emplace_back(SymmetryOperation::Sn, order, reflection.axis);
+                    if (order % i == 0 || i % 2 == 0)
+                        continue;
+
+                    symmetryOperations.emplace_back(
+                        SymmetryOperation::Sn_power,
+                        order / std::gcd(order, i),
+                        axis,
+                        i * improperRotationMatrix,
+                        i / std::gcd(order, i)
+                    );
                 }
             }
         }
@@ -499,9 +638,9 @@ PointGroup classifyPointGroup(const std::vector<SymmetryOperation>& symmetryOper
     if (std::abs(sortedMoments[0]) < tol && std::abs(sortedMoments[1] - sortedMoments[2]) < tol)
     {
         if (hasInversion)
-            return PointGroup(PointGroup::Dinfh, 0);
+            return PointGroup(PointGroup::Dinfh, 0, symmetryOperations);
         else
-            return PointGroup(PointGroup::Cinfh, 0);
+            return PointGroup(PointGroup::Cinfh, 0, symmetryOperations);
     }
 
     bool hasRotation = false;
@@ -527,32 +666,30 @@ PointGroup classifyPointGroup(const std::vector<SymmetryOperation>& symmetryOper
     if (!hasRotation)
     {
         if (hasSigmaPlane)
-            return PointGroup(PointGroup::Cs, 0);
+            return PointGroup(PointGroup::Cs, 0, symmetryOperations);
         if (hasInversion)
-            return PointGroup(PointGroup::Ci, 0);
+            return PointGroup(PointGroup::Ci, 0, symmetryOperations);
         else
-            return PointGroup(PointGroup::C1, 0);
+            return PointGroup(PointGroup::C1, 0, symmetryOperations);
     }
 
 
-    size_t principalRotationIndex = 0;
-    for (size_t i = 0; i < symmetryOperations.size(); ++i)
+    auto principalRotationAxis    = Vec3(0, 0, 1);
+    size_t principalRotationOrder = 1;
+    for (const auto& op : symmetryOperations)
     {
-        if (symmetryOperations[i].type == SymmetryOperation::Cn
-            && symmetryOperations[i].order > symmetryOperations[principalRotationIndex].order)
+        if (op.type == SymmetryOperation::Cn && op.order > principalRotationOrder)
         {
-            principalRotationIndex = i;
+            principalRotationOrder = op.order;
         }
     }
-    SymmetryOperation principalRotation = symmetryOperations[principalRotationIndex];
 
     std::vector<SymmetryOperation> perpendicularC2Axes;
-    // for (size_t i = 0; i < symmetryOperations.size(); ++i)
     for (const auto& op : symmetryOperations)
     {
         if (op.type == SymmetryOperation::Cn && op.order == 2)
         {
-            if (op.axis.dot(principalRotation.axis) < tol)
+            if (op.axis.dot(principalRotationAxis) < tol)
 
             {
                 perpendicularC2Axes.push_back(op);
@@ -563,8 +700,7 @@ PointGroup classifyPointGroup(const std::vector<SymmetryOperation>& symmetryOper
     bool hasSigmaHPlane = false;
     for (const auto& op : symmetryOperations)
     {
-        if (op.type == SymmetryOperation::sigma
-            && areColinear(op.axis, symmetryOperations[principalRotationIndex].axis, tol))
+        if (op.type == SymmetryOperation::sigma && areColinear(op.axis, principalRotationAxis, tol))
         {
             hasSigmaHPlane = true;
             break;
@@ -574,7 +710,7 @@ PointGroup classifyPointGroup(const std::vector<SymmetryOperation>& symmetryOper
     size_t numOfSigmaDPlanes = 0;
     for (const auto& op : symmetryOperations)
     {
-        if (op.type == SymmetryOperation::sigma && op.axis.dot(principalRotation.axis) < tol)
+        if (op.type == SymmetryOperation::sigma && op.axis.dot(principalRotationAxis) < tol)
         {
             for (size_t i = 0; i < perpendicularC2Axes.size(); ++i)
             {
@@ -594,7 +730,7 @@ PointGroup classifyPointGroup(const std::vector<SymmetryOperation>& symmetryOper
     bool hasSigmaVPlane = false;
     for (const auto& op : symmetryOperations)
     {
-        if (op.type == SymmetryOperation::sigma && op.axis.dot(symmetryOperations[principalRotationIndex].axis) < tol)
+        if (op.type == SymmetryOperation::sigma && op.axis.dot(principalRotationAxis) < tol)
         {
             hasSigmaVPlane = true;
             break;
@@ -618,9 +754,9 @@ PointGroup classifyPointGroup(const std::vector<SymmetryOperation>& symmetryOper
         if (numOfC5Axes == 6)
         {
             if (hasInversion)
-                return PointGroup(PointGroup::Ih, 0);
+                return PointGroup(PointGroup::Ih, 0, symmetryOperations);
             else
-                return PointGroup(PointGroup::I, 0);
+                return PointGroup(PointGroup::I, 0, symmetryOperations);
         }
 
         size_t numOfC4Axes = 0;
@@ -635,9 +771,9 @@ PointGroup classifyPointGroup(const std::vector<SymmetryOperation>& symmetryOper
         if (numOfC4Axes == 3)
         {
             if (hasInversion)
-                return PointGroup(PointGroup::Oh, 0);
+                return PointGroup(PointGroup::Oh, 0, symmetryOperations);
             else
-                return PointGroup(PointGroup::O, 0);
+                return PointGroup(PointGroup::O, 0, symmetryOperations);
         }
 
         size_t numOfC3Axes = 0;
@@ -652,11 +788,11 @@ PointGroup classifyPointGroup(const std::vector<SymmetryOperation>& symmetryOper
         if (numOfC3Axes == 4)
         {
             if (hasInversion)
-                return PointGroup(PointGroup::Th, 0);
+                return PointGroup(PointGroup::Th, 0, symmetryOperations);
             else if (numOfSigmaDPlanes == 6)
-                return PointGroup(PointGroup::Td, 0);
+                return PointGroup(PointGroup::Td, 0, symmetryOperations);
             else
-                return PointGroup(PointGroup::T, 0);
+                return PointGroup(PointGroup::T, 0, symmetryOperations);
         }
     }
 
@@ -664,22 +800,22 @@ PointGroup classifyPointGroup(const std::vector<SymmetryOperation>& symmetryOper
     else if (std::abs(sortedMoments[0] - sortedMoments[1]) < tol || std::abs(sortedMoments[1] - sortedMoments[2]) < tol)
     {
         // symmetric top
-        if (perpendicularC2Axes.size() == principalRotation.order)
+        if (perpendicularC2Axes.size() == principalRotationOrder)
         {
             if (hasSigmaHPlane)
             {
-                return PointGroup(PointGroup::Dnh, principalRotation.order);
+                return PointGroup(PointGroup::Dnh, principalRotationOrder, symmetryOperations);
             }
-            if (numOfSigmaDPlanes == principalRotation.order)
-                return PointGroup(PointGroup::Dnd, principalRotation.order);
-            return PointGroup(PointGroup::Dn, principalRotation.order);
+            if (numOfSigmaDPlanes == principalRotationOrder)
+                return PointGroup(PointGroup::Dnd, principalRotationOrder, symmetryOperations);
+            return PointGroup(PointGroup::Dn, principalRotationOrder, symmetryOperations);
         }
         else
         {
             if (hasSigmaHPlane)
-                return PointGroup(PointGroup::Cnh, principalRotation.order);
+                return PointGroup(PointGroup::Cnh, principalRotationOrder, symmetryOperations);
             if (hasSigmaVPlane)
-                return PointGroup(PointGroup::Cnv, principalRotation.order);
+                return PointGroup(PointGroup::Cnv, principalRotationOrder, symmetryOperations);
             bool hasImproperRotation = false;
             for (const auto& op : symmetryOperations)
             {
@@ -690,8 +826,8 @@ PointGroup classifyPointGroup(const std::vector<SymmetryOperation>& symmetryOper
                 }
             }
             if (hasImproperRotation)
-                return PointGroup(PointGroup::S2n, principalRotation.order); // Improper rotation
-            return PointGroup(PointGroup::Cn, principalRotation.order);
+                return PointGroup(PointGroup::S2n, principalRotationOrder, symmetryOperations); // Improper rotation
+            return PointGroup(PointGroup::Cn, principalRotationOrder, symmetryOperations);
         }
     }
 
@@ -708,20 +844,21 @@ PointGroup classifyPointGroup(const std::vector<SymmetryOperation>& symmetryOper
     if (numOfC2Axes == 3)
     {
         if (hasSigmaHPlane)
-            return PointGroup(PointGroup::Dnh, 2);
+            return PointGroup(PointGroup::Dnh, 2, symmetryOperations);
         else
-            return PointGroup(PointGroup::Dn, 2);
+            return PointGroup(PointGroup::Dn, 2, symmetryOperations);
     }
     else
     {
         if (hasSigmaHPlane)
-            return PointGroup(PointGroup::Cnh, 2);
+            return PointGroup(PointGroup::Cnh, 2, symmetryOperations);
         if (hasSigmaVPlane)
-            return PointGroup(PointGroup::Cnv, 2);
-        return PointGroup(PointGroup::Cn, 2);
+            return PointGroup(PointGroup::Cnv, 2, symmetryOperations);
+        return PointGroup(PointGroup::Cn, 2, symmetryOperations);
         // We alrady handled C1, Cs, Ci and S2n
     }
 }
+
 
 Eigen::Matrix3d createRotationMatrix(const Vec3& axis, double angle)
 {
@@ -747,8 +884,10 @@ Eigen::Matrix3d createRotationMatrix(const Vec3& axis, double angle)
     return R;
 }
 
+
 Eigen::Matrix3d createReflectionMatrix(const Vec3& normal)
 {
     return Eigen::Matrix3d::Identity() - 2.0 * normal.normalized() * normal.normalized().transpose();
 }
+
 } // namespace Symmetry

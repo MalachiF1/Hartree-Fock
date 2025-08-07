@@ -5,7 +5,7 @@
 #include <string>
 
 /**
- * @ brief Represents a symmetry operation in a molecule.
+ * @brief Represents a symmetry operation in a molecule.
  *
  * This class encapsulates the type of symmetry operation (proper rotation, reflection, inversion, or improper
  * rotation), the order of the operation, and the axis of rotation or reflection plane normal.
@@ -14,19 +14,24 @@ struct SymmetryOperation
 {
     enum SymmetryType
     {
-        Cn,    // Proper rotation
-        sigma, // Reflection
-        i,     // Inversion
-        Sn     // Improper rotation
+        Cn,       // Proper rotation
+        Cn_power, // Proper rotation power (e.g, C_3^2)
+        sigma,    // Reflection
+        i,        // Inversion
+        Sn,       // Improper rotation
+        Sn_power, // Improper rotation power (e.g, S_6^5)
+        E         // Identity operation
     };
 
     SymmetryOperation() = default;
-    SymmetryOperation(SymmetryType type, size_t order, const Vec3& axis);
+    SymmetryOperation(SymmetryType type, size_t order, const Vec3& axis, const Eigen::Matrix3d& matrix, size_t power = 1);
     std::string toString() const;
 
     SymmetryType type;
     size_t order;
-    Vec3 axis; // Axis of rotation or reflection plane normal
+    Vec3 axis;              // Axis of rotation or reflection plane normal
+    Eigen::Matrix3d matrix; // Matrix representation of the symmetry operation
+    size_t power;
 };
 
 /**
@@ -59,12 +64,14 @@ struct PointGroup
         C1,
     };
 
-    PointGroup() = default;
-    PointGroup(PointGroupClass pointGroupClass, size_t order);
+    PointGroup();
+    PointGroup(PointGroupClass pointGroupClass, size_t n, const std::vector<SymmetryOperation>& symmetryOperations);
 
     std::string toString() const;
 
     PointGroupClass pointGroupClass;
+    size_t n;
+    std::vector<SymmetryOperation> symmetryOperations;
     size_t order;
 };
 
@@ -81,12 +88,14 @@ std::pair<Vec3, Eigen::Matrix3d> diagonalizeInertiaTensor(const std::vector<Atom
 
 /**
  * Translates the molecule so the center of mass is at the origin and rotates it to align with the principal axes.
+ * The z axis is aligned with the principal axis of rotation, if it exists.
  *
  * @param geometry The geometry of the molecule as a vector of atoms.
  * @param principalAxes The principal axes of the molecule as a 3x3 matrix.
+ * @param tol The tolerance for considering two distances or coordinates identical, used for determining the principle axis of rotation.
  * @return A new vector of atoms representing the translated and rotated geometry.
  */
-std::vector<Atom> translateAndRotate(const std::vector<Atom>& geometry, const Eigen::Matrix3d& principalAxes);
+std::vector<Atom> translateAndRotate(const std::vector<Atom>& geometry, const Eigen::Matrix3d& principalAxes, double tol);
 
 /**
  * Finds the symmetry equivalent atom (SEA) groups in the molecule's geometry.
@@ -123,9 +132,9 @@ bool isSymmetryOperation(const std::vector<Atom>& geometry, const Eigen::Matrix3
  *
  * @param geometry The geometry of the molecule as a vector of atoms.
  * @param tol The tolerance for considering two distances or coordiantes identical.
- * @return True if the molecule has an inversion center, false otherwise.
+ * @return A vector containing a single symmetry operation representing the inversion center if it exists, otherwise an empty vector.
  */
-bool hasInvertion(const std::vector<Atom>& geometry, double tol);
+std::vector<SymmetryOperation> findInvertion(const std::vector<Atom>& geometry, double tol);
 
 /**
  * Finds proper rotations in the molecule's geometry. This function assumes that the Center of mass is centered at the
@@ -155,23 +164,21 @@ std::vector<SymmetryOperation> findReflectionPlanes(
 
 /**
  * Finds improper rotations in the molecule's geometry. This function assumes that the Center of mass is centered at
- * the origin and that the geometry is aligned with the principal axes.
+ * the origin and that the geometry is aligned with the principal axes. Inversion operation is not returned by this
+ * function, see findInvertion() instead.
  *
  * @param geometry The geometry of the molecule as a vector of atoms.
- * @param properRotations The proper rotations found in the molecule's geometry.
- * @param reflectionPlanes The reflection planes found in the molecule's geometry.
+ * @param SEAIndecies The symmetry equivalent atom groups.
  * @param tol The tolerance for considering two distances or coordiantes identical.
  * @return A vector of symmetry operations representing the improper rotations.
  */
 std::vector<SymmetryOperation> findImproperRotations(
-    const std::vector<Atom>& geometry,
-    const std::vector<SymmetryOperation>& properRotations,
-    const std::vector<SymmetryOperation>& reflectionPlanes,
-    double tol = 1e-5
+    const std::vector<Atom>& geometry, const std::vector<std::vector<size_t>>& SEAIndecies, double tol
 );
 
 /**
  * Classifies the point group of a molecule based on its symmetry operations and principal moments.
+ * Assumes that the molecule is aligned with the principal axes such that the z-axis is the principal axis of rotation, if it exists.
  *
  * @param symmetryOperations The symmetry operations found in the molecule's geometry.
  * @param principalMoments The principal moments of inertia of the molecule.
