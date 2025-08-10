@@ -6,8 +6,22 @@
 #include <iostream>
 
 AtomicOrbital::AtomicOrbital(const Vec3& center, const std::vector<PrimitiveGaussian>& primitives) :
-    center(center), primitives(primitives)
+    center(center), angularMomentum(primitives[0].angularMomentum), primitives(primitives)
 {
+    for (const auto& p : primitives)
+    {
+        if (angularMomentum != p.angularMomentum)
+        {
+            int l = angularMomentum.x();
+            int m = angularMomentum.y();
+            int n = angularMomentum.z();
+
+            // If any primitive has different angular momentum, throw an error
+            std::cerr << "Angular momentum mismatch: (" << l << ", " << m << ", " << n << ") vs ("
+                      << p.angularMomentum.x() << ", " << p.angularMomentum.y() << ", " << p.angularMomentum.z() << ")\n";
+            throw std::invalid_argument("All primitive gaussians must have the same angular momentum.");
+        }
+    }
 }
 
 std::string AtomicOrbital::toString() const
@@ -35,15 +49,22 @@ double AtomicOrbital::overlap(const AtomicOrbital& ao1, const AtomicOrbital& ao2
     {
         for (const auto& p2 : ao2.primitives)
         {
+            int l1 = p1.angularMomentum.x();
+            int m1 = p1.angularMomentum.y();
+            int n1 = p1.angularMomentum.z();
+            int l2 = p2.angularMomentum.x();
+            int m2 = p2.angularMomentum.y();
+            int n2 = p2.angularMomentum.z();
+
             double p = p1.exponent + p2.exponent;
             double q = (p1.exponent * p2.exponent) / p;
             Vec3 Q   = p1.coords - p2.coords;
 
             double prefactor = std::pow(M_PI / p, 1.5) * std::exp(-q * (p1.coords - p2.coords).squaredNorm());
 
-            double Sx = E(0, p1.l, p2.l, Q.x(), p1.exponent, p2.exponent);
-            double Sy = E(0, p1.m, p2.m, Q.y(), p1.exponent, p2.exponent);
-            double Sz = E(0, p1.n, p2.n, Q.z(), p1.exponent, p2.exponent);
+            double Sx = E(0, l1, l2, Q.x(), p1.exponent, p2.exponent);
+            double Sy = E(0, m1, m2, Q.y(), p1.exponent, p2.exponent);
+            double Sz = E(0, n1, n2, Q.z(), p1.exponent, p2.exponent);
 
             total_overlap += p1.normConst * p2.normConst * p1.coeff * p2.coeff * prefactor * Sx * Sy * Sz;
         }
@@ -58,35 +79,37 @@ double AtomicOrbital::kinetic(const AtomicOrbital& ao1, const AtomicOrbital& ao2
     {
         for (const auto& p2 : ao2.primitives)
         {
+            int l1 = p1.angularMomentum.x();
+            int m1 = p1.angularMomentum.y();
+            int n1 = p1.angularMomentum.z();
+            int l2 = p2.angularMomentum.x();
+            int m2 = p2.angularMomentum.y();
+            int n2 = p2.angularMomentum.z();
+
             double p = p1.exponent + p2.exponent;
             double q = (p1.exponent * p2.exponent) / p;
             Vec3 Q   = p1.coords - p2.coords;
 
-            double term1 = p2.exponent * (2 * (p2.l + p2.m + p2.n) + 3) * E(0, p1.l, p2.l, Q.x(), p1.exponent, p2.exponent)
-                         * E(0, p1.m, p2.m, Q.y(), p1.exponent, p2.exponent)
-                         * E(0, p1.n, p2.n, Q.z(), p1.exponent, p2.exponent);
+            double term1 = p2.exponent * (2 * (l2 + m2 + n2) + 3) * E(0, l1, l2, Q.x(), p1.exponent, p2.exponent)
+                         * E(0, m1, m2, Q.y(), p1.exponent, p2.exponent) * E(0, n1, n2, Q.z(), p1.exponent, p2.exponent);
 
             double term2 = -2.0 * std::pow(p2.exponent, 2)
-                         * (E(0, p1.l, p2.l + 2, Q.x(), p1.exponent, p2.exponent)
-                                * E(0, p1.m, p2.m, Q.y(), p1.exponent, p2.exponent)
-                                * E(0, p1.n, p2.n, Q.z(), p1.exponent, p2.exponent)
-                            + E(0, p1.l, p2.l, Q.x(), p1.exponent, p2.exponent)
-                                  * E(0, p1.m, p2.m + 2, Q.y(), p1.exponent, p2.exponent)
-                                  * E(0, p1.n, p2.n, Q.z(), p1.exponent, p2.exponent)
-                            + E(0, p1.l, p2.l, Q.x(), p1.exponent, p2.exponent)
-                                  * E(0, p1.m, p2.m, Q.y(), p1.exponent, p2.exponent)
-                                  * E(0, p1.n, p2.n + 2, Q.z(), p1.exponent, p2.exponent));
+                         * (E(0, l1, l2 + 2, Q.x(), p1.exponent, p2.exponent) * E(0, m1, m2, Q.y(), p1.exponent, p2.exponent)
+                                * E(0, n1, n2, Q.z(), p1.exponent, p2.exponent)
+                            + E(0, l1, l2, Q.x(), p1.exponent, p2.exponent) * E(0, m1, m2 + 2, Q.y(), p1.exponent, p2.exponent)
+                                  * E(0, n1, n2, Q.z(), p1.exponent, p2.exponent)
+                            + E(0, l1, l2, Q.x(), p1.exponent, p2.exponent) * E(0, m1, m2, Q.y(), p1.exponent, p2.exponent)
+                                  * E(0, n1, n2 + 2, Q.z(), p1.exponent, p2.exponent));
 
             double term3 = -0.5
-                         * (p2.l * (p2.l - 1) * E(0, p1.l, p2.l - 2, Q.x(), p1.exponent, p2.exponent)
-                                * E(0, p1.m, p2.m, Q.y(), p1.exponent, p2.exponent)
-                                * E(0, p1.n, p2.n, Q.z(), p1.exponent, p2.exponent)
-                            + p2.m * (p2.m - 1) * E(0, p1.l, p2.l, Q.x(), p1.exponent, p2.exponent)
-                                  * E(0, p1.m, p2.m - 2, Q.y(), p1.exponent, p2.exponent)
-                                  * E(0, p1.n, p2.n, Q.z(), p1.exponent, p2.exponent)
-                            + p2.n * (p2.n - 1) * E(0, p1.l, p2.l, Q.x(), p1.exponent, p2.exponent)
-                                  * E(0, p1.m, p2.m, Q.y(), p1.exponent, p2.exponent)
-                                  * E(0, p1.n, p2.n - 2, Q.z(), p1.exponent, p2.exponent));
+                         * (l2 * (l2 - 1) * E(0, l1, l2 - 2, Q.x(), p1.exponent, p2.exponent)
+                                * E(0, m1, m2, Q.y(), p1.exponent, p2.exponent) * E(0, n1, n2, Q.z(), p1.exponent, p2.exponent)
+                            + m2 * (m2 - 1) * E(0, l1, l2, Q.x(), p1.exponent, p2.exponent)
+                                  * E(0, m1, m2 - 2, Q.y(), p1.exponent, p2.exponent)
+                                  * E(0, n1, n2, Q.z(), p1.exponent, p2.exponent)
+                            + n2 * (n2 - 1) * E(0, l1, l2, Q.x(), p1.exponent, p2.exponent)
+                                  * E(0, m1, m2, Q.y(), p1.exponent, p2.exponent)
+                                  * E(0, n1, n2 - 2, Q.z(), p1.exponent, p2.exponent));
 
             double prefactor = std::pow(M_PI / p, 1.5) * std::exp(-q * Q.squaredNorm());
             total_kinetic += p1.normConst * p2.normConst * p1.coeff * p2.coeff * prefactor * (term1 + term2 + term3);
@@ -102,6 +125,13 @@ double AtomicOrbital::nuclearAttraction(const AtomicOrbital& ao1, const AtomicOr
     {
         for (const auto& p2 : ao2.primitives)
         {
+            int l1 = p1.angularMomentum.x();
+            int m1 = p1.angularMomentum.y();
+            int n1 = p1.angularMomentum.z();
+            int l2 = p2.angularMomentum.x();
+            int m2 = p2.angularMomentum.y();
+            int n2 = p2.angularMomentum.z();
+
             double p = p1.exponent + p2.exponent;
             Vec3 P   = (p1.exponent * p1.coords + p2.exponent * p2.coords) / p;
             double q = (p1.exponent * p2.exponent) / p;
@@ -111,16 +141,14 @@ double AtomicOrbital::nuclearAttraction(const AtomicOrbital& ao1, const AtomicOr
             double prefactor = -1.0 * (2.0 * M_PI / p) * std::exp(-q * (p1.coords - p2.coords).squaredNorm());
 
             double sum = 0.0;
-            for (int t = 0; t <= p1.l + p2.l; ++t)
+            for (int t = 0; t <= l1 + l2; ++t)
             {
-                for (int u = 0; u <= p1.m + p2.m; ++u)
+                for (int u = 0; u <= m1 + m2; ++u)
                 {
-                    for (int v = 0; v <= p1.n + p2.n; ++v)
+                    for (int v = 0; v <= n1 + n2; ++v)
                     {
-                        sum += E(t, p1.l, p2.l, Q.x(), p1.exponent, p2.exponent)
-                             * E(u, p1.m, p2.m, Q.y(), p1.exponent, p2.exponent)
-                             * E(v, p1.n, p2.n, Q.z(), p1.exponent, p2.exponent)
-                             * R(t, u, v, 0, p, PC, p * PC.squaredNorm());
+                        sum += E(t, l1, l2, Q.x(), p1.exponent, p2.exponent) * E(u, m1, m2, Q.y(), p1.exponent, p2.exponent)
+                             * E(v, n1, n2, Q.z(), p1.exponent, p2.exponent) * R(t, u, v, 0, p, PC, p * PC.squaredNorm());
                     }
                 }
             }
@@ -142,55 +170,53 @@ double AtomicOrbital::electronRepulsion(
     {
         for (const auto& p2 : ao2.primitives)
         {
+            int l1 = p1.angularMomentum.x();
+            int m1 = p1.angularMomentum.y();
+            int n1 = p1.angularMomentum.z();
+            int l2 = p2.angularMomentum.x();
+            int m2 = p2.angularMomentum.y();
+            int n2 = p2.angularMomentum.z();
+
             double p_ab = p1.exponent + p2.exponent;
             Vec3 P_ab   = (p1.exponent * p1.coords + p2.exponent * p2.coords) / p_ab;
             double q_ab = (p1.exponent * p2.exponent) / p_ab;
             Vec3 Q_ab   = p1.coords - p2.coords;
 
             // precompute E values so we don't recompute them in the nested loops
-            std::vector<double> Ex1_values(p1.l + p2.l + 1);
-            std::vector<double> Ey1_values(p1.m + p2.m + 1);
-            std::vector<double> Ez1_values(p1.n + p2.n + 1);
+            std::vector<double> Ex1_values(l1 + l2 + 1);
+            std::vector<double> Ey1_values(m1 + m2 + 1);
+            std::vector<double> Ez1_values(n1 + n2 + 1);
 
-            for (int t1 = 0; t1 <= p1.l + p2.l; ++t1)
-            {
-                Ex1_values[t1] = E(t1, p1.l, p2.l, Q_ab.x(), p1.exponent, p2.exponent);
-            }
-            for (int u1 = 0; u1 <= p1.m + p2.m; ++u1)
-            {
-                Ey1_values[u1] = E(u1, p1.m, p2.m, Q_ab.y(), p1.exponent, p2.exponent);
-            }
-            for (int v1 = 0; v1 <= p1.n + p2.n; ++v1)
-            {
-                Ez1_values[v1] = E(v1, p1.n, p2.n, Q_ab.z(), p1.exponent, p2.exponent);
-            }
+            for (int t1 = 0; t1 <= l1 + l2; ++t1) Ex1_values[t1] = E(t1, l1, l2, Q_ab.x(), p1.exponent, p2.exponent);
+            for (int u1 = 0; u1 <= m1 + m2; ++u1) Ey1_values[u1] = E(u1, m1, m2, Q_ab.y(), p1.exponent, p2.exponent);
+            for (int v1 = 0; v1 <= n1 + n2; ++v1) Ez1_values[v1] = E(v1, n1, n2, Q_ab.z(), p1.exponent, p2.exponent);
 
             for (const auto& p3 : ao3.primitives)
             {
                 for (const auto& p4 : ao4.primitives)
                 {
+                    int l3 = p3.angularMomentum.x();
+                    int m3 = p3.angularMomentum.y();
+                    int n3 = p3.angularMomentum.z();
+                    int l4 = p4.angularMomentum.x();
+                    int m4 = p4.angularMomentum.y();
+                    int n4 = p4.angularMomentum.z();
 
                     double p_cd = p3.exponent + p4.exponent;
                     Vec3 P_cd   = (p3.exponent * p3.coords + p4.exponent * p4.coords) / p_cd;
                     double q_cd = (p3.exponent * p4.exponent) / p_cd;
                     Vec3 Q_cd   = p3.coords - p4.coords;
 
-                    std::vector<double> Ex2_values(p3.l + p4.l + 1);
-                    std::vector<double> Ey2_values(p3.m + p4.m + 1);
-                    std::vector<double> Ez2_values(p3.n + p4.n + 1);
+                    std::vector<double> Ex2_values(l3 + l4 + 1);
+                    std::vector<double> Ey2_values(m3 + m4 + 1);
+                    std::vector<double> Ez2_values(n3 + n4 + 1);
 
-                    for (int t2 = 0; t2 <= p3.l + p4.l; ++t2)
-                    {
-                        Ex2_values[t2] = E(t2, p3.l, p4.l, Q_cd.x(), p3.exponent, p4.exponent);
-                    }
-                    for (int u2 = 0; u2 <= p3.m + p4.m; ++u2)
-                    {
-                        Ey2_values[u2] = E(u2, p3.m, p4.m, Q_cd.y(), p3.exponent, p4.exponent);
-                    }
-                    for (int v2 = 0; v2 <= p3.n + p4.n; ++v2)
-                    {
-                        Ez2_values[v2] = E(v2, p3.n, p4.n, Q_cd.z(), p3.exponent, p4.exponent);
-                    }
+                    for (int t2 = 0; t2 <= l3 + l4; ++t2)
+                        Ex2_values[t2] = E(t2, l3, l4, Q_cd.x(), p3.exponent, p4.exponent);
+                    for (int u2 = 0; u2 <= m3 + m4; ++u2)
+                        Ey2_values[u2] = E(u2, m3, m4, Q_cd.y(), p3.exponent, p4.exponent);
+                    for (int v2 = 0; v2 <= n3 + n4; ++v2)
+                        Ez2_values[v2] = E(v2, n3, n4, Q_cd.z(), p3.exponent, p4.exponent);
 
                     double delta_eri = (p_ab * p_cd) / (p_ab + p_cd);
                     double T         = delta_eri * (P_ab - P_cd).squaredNorm();
@@ -200,23 +226,23 @@ double AtomicOrbital::electronRepulsion(
                                      * std::exp(-q_cd * (p3.coords - p4.coords).squaredNorm());
 
                     double sum = 0.0;
-                    for (int t1 = 0; t1 <= p1.l + p2.l; ++t1)
+                    for (int t1 = 0; t1 <= l1 + l2; ++t1)
                     {
                         double Ex1 = Ex1_values[t1];
-                        for (int u1 = 0; u1 <= p1.m + p2.m; ++u1)
+                        for (int u1 = 0; u1 <= m1 + m2; ++u1)
                         {
                             double Ey1 = Ey1_values[u1];
-                            for (int v1 = 0; v1 <= p1.n + p2.n; ++v1)
+                            for (int v1 = 0; v1 <= n1 + n2; ++v1)
                             {
                                 double Ez1 = Ez1_values[v1];
 
-                                for (int t2 = 0; t2 <= p3.l + p4.l; ++t2)
+                                for (int t2 = 0; t2 <= l3 + l4; ++t2)
                                 {
                                     double Ex2 = Ex2_values[t2];
-                                    for (int u2 = 0; u2 <= p3.m + p4.m; ++u2)
+                                    for (int u2 = 0; u2 <= m3 + m4; ++u2)
                                     {
                                         double Ey2 = Ey2_values[u2];
-                                        for (int v2 = 0; v2 <= p3.n + p4.n; ++v2)
+                                        for (int v2 = 0; v2 <= n3 + n4; ++v2)
                                         {
                                             double Ez2 = Ez2_values[v2];
 

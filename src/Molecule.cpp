@@ -10,32 +10,38 @@
 #include <iostream>
 #include <sstream>
 
-Molecule::Molecule(int charge, int multiplicity, const std::string& basisName, const std::vector<Atom>& geometry) :
-    charge(charge), multiplicity(multiplicity), electronCount(countElectrons())
+Molecule::Molecule(
+    int charge, int multiplicity, const std::string& basisName, const std::vector<Atom>& geometry, double symmetryTolerance
+) :
+    charge(charge), multiplicity(multiplicity)
 {
+    auto centeredGeometry                  = Symmetry::translateCOMToOrigin(geometry);
+    auto [principalMoments, principalAxes] = Symmetry::diagonalizeInertiaTensor(centeredGeometry);
+
+    std::cout << "Principal moments of inertia: " << principalMoments.transpose() << std::endl;
+
+    this->geometry = Symmetry::alignWithPrincipalAxes(centeredGeometry, principalAxes, principalMoments, symmetryTolerance);
+    this->electronCount = countElectrons();
     buildBasis(basisName);
     this->basisFunctionCount = atomicOrbitals.size();
 
-    auto [principalMoments, principalAxes] = Symmetry::diagonalizeInertiaTensor(geometry);
-    this->geometry                         = Symmetry::translateAndRotate(geometry, principalAxes);
+    this->pointGroup = Symmetry::classifyPointGroup(this->geometry, principalMoments, symmetryTolerance);
 
-    std::vector<std::vector<size_t>> SEAIndeces = Symmetry::findSEAGroups(this->geometry, 1e-5);
+    std::vector<std::vector<size_t>> SEAIndeces = Symmetry::findSEAGroups(this->geometry, symmetryTolerance);
 
-    bool hasInvertion      = Symmetry::hasInvertion(this->geometry, 1e-5);
-    auto properRotations   = Symmetry::findProperRotations(this->geometry, SEAIndeces, 1e-5);
-    auto reflectionPlanes  = Symmetry::findReflectionPlanes(this->geometry, SEAIndeces, 1e-5);
-    auto improperRotations = Symmetry::findImproperRotations(this->geometry, properRotations, reflectionPlanes, 1e-5);
+    auto invertion         = Symmetry::findInvertion(this->geometry, symmetryTolerance);
+    auto properRotations   = Symmetry::findProperRotations(this->geometry, SEAIndeces, symmetryTolerance);
+    auto reflectionPlanes  = Symmetry::findReflectionPlanes(this->geometry, SEAIndeces, symmetryTolerance);
+    auto improperRotations = Symmetry::findImproperRotations(this->geometry, SEAIndeces, symmetryTolerance);
 
     std::vector<SymmetryOperation> operations;
-    operations.reserve(properRotations.size() + reflectionPlanes.size() + improperRotations.size() + 1);
-    if (hasInvertion)
-        operations.emplace_back(SymmetryOperation::i, 0, Vec3(0.0, 0.0, 0.0));
-
+    operations.reserve(properRotations.size() + reflectionPlanes.size() + improperRotations.size() + invertion.size());
     std::copy(properRotations.begin(), properRotations.end(), std::back_inserter(operations));
     std::copy(reflectionPlanes.begin(), reflectionPlanes.end(), std::back_inserter(operations));
     std::copy(improperRotations.begin(), improperRotations.end(), std::back_inserter(operations));
+    std::copy(invertion.begin(), invertion.end(), std::back_inserter(operations));
 
-    this->pointGroup = Symmetry::classifyPointGroup(operations, principalMoments, 1e-4);
+    this->pointGroup = Symmetry::classifyPointGroup(operations, principalMoments, symmetryTolerance * 10.0);
 }
 
 std::string Molecule::toString() const
@@ -70,9 +76,7 @@ void Molecule::buildBasis(const std::string& basisName)
     {
         // Ensure that no duplicate atomic numbers are added to the elements vector.
         if (std::find(elements.begin(), elements.end(), atom.atomicNumber) == elements.end())
-        {
             elements.push_back(atom.atomicNumber);
-        }
     }
 
     auto basisData = Basis::getBasis(basisName, elements);
@@ -93,7 +97,9 @@ void Molecule::buildBasis(const std::string& basisName)
                     std::vector<PrimitiveGaussian> primitives;
                     for (size_t p = 0; p < shell.exponents.size(); ++p)
                     {
-                        primitives.emplace_back(shell.exponents[p], shell.coefficients[p], atom.coords, i, j, k);
+                        primitives.emplace_back(
+                            shell.exponents[p], shell.coefficients[p], atom.coords, Eigen::Vector3i(i, j, k)
+                        );
                     }
                     atomicOrbitals.emplace_back(atom.coords, primitives);
                 }

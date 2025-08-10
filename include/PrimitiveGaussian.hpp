@@ -16,13 +16,13 @@
 class PrimitiveGaussian
 {
   public:
-    const double exponent;  // Exponent
-    const double coeff;     // Contraction coefficient
-    const Vec3 coords;      // Center coordinates
-    const int l, m, n;      // Angular momentum numbers (x, y, z)
-    const double normConst; // Normalization constant
+    const double exponent;                 // Exponent
+    const double coeff;                    // Contraction coefficient
+    const Vec3 coords;                     // Center coordinates
+    const Eigen::Vector3i angularMomentum; // Angular momentum numbers (x, y, z)
+    const double normConst;                // Normalization constant
 
-    PrimitiveGaussian(double exponent, double coeff, const Vec3& coords, int l, int m, int n);
+    PrimitiveGaussian(double exponent, double coeff, const Vec3& coords, const Eigen::Vector3i& angularMomentum);
 
     /**
      * Returns a string representation of the primitive Gaussian.
@@ -41,5 +41,5 @@ class PrimitiveGaussian
      * @param n Angular momentum number in the z direction
      * @return The nomralization constant of a primitive gaussian with the specified exponent and angular momentum
      */
-    static double normalizationConst(double exponent, int l, int m, int n);
+    static double normalizationConst(double exponent, const Eigen::Vector3i& angularMomentum);
 };

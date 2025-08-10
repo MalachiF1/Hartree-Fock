@@ -207,7 +207,7 @@ class Molecule
     const int charge;
     const int multiplicity;
     std::vector<Atom> geometry;
-    const size_t electronCount;
+    size_t electronCount;
     std::vector<AtomicOrbital> atomicOrbitals;
     PointGroup pointGroup;
 };
