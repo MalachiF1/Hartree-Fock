@@ -1,7 +1,7 @@
 #include "Molecule.hpp"
 
 #include "Basis.hpp"
-#include "Symmetry.hpp"
+#include "Symmetry/Symmetry.hpp"
 #include "Utils.hpp"
 
 #include <cstddef>
@@ -15,33 +15,17 @@ Molecule::Molecule(
 ) :
     charge(charge), multiplicity(multiplicity)
 {
-    auto centeredGeometry                  = Symmetry::translateCOMToOrigin(geometry);
-    auto [principalMoments, principalAxes] = Symmetry::diagonalizeInertiaTensor(centeredGeometry);
 
-    std::cout << "Principal moments of inertia: " << principalMoments.transpose() << std::endl;
+    auto newGeometry                       = Symmetry::translateCOMToOrigin(geometry);
+    auto [principalMoments, principalAxes] = Symmetry::diagonalizeInertiaTensor(newGeometry);
+    PointGroup pointGroup = Symmetry::classifyPointGroup(newGeometry, principalMoments, symmetryTolerance);
+    Symmetry::alignCanonically(newGeometry, pointGroup, principalMoments, principalAxes, symmetryTolerance);
+    this->geometry   = newGeometry;
+    this->pointGroup = pointGroup;
 
-    this->geometry = Symmetry::alignWithPrincipalAxes(centeredGeometry, principalAxes, principalMoments, symmetryTolerance);
-    this->electronCount = countElectrons();
     buildBasis(basisName);
+    this->electronCount      = countElectrons();
     this->basisFunctionCount = atomicOrbitals.size();
-
-    this->pointGroup = Symmetry::classifyPointGroup(this->geometry, principalMoments, symmetryTolerance);
-
-    std::vector<std::vector<size_t>> SEAIndeces = Symmetry::findSEAGroups(this->geometry, symmetryTolerance);
-
-    auto invertion         = Symmetry::findInvertion(this->geometry, symmetryTolerance);
-    auto properRotations   = Symmetry::findProperRotations(this->geometry, SEAIndeces, symmetryTolerance);
-    auto reflectionPlanes  = Symmetry::findReflectionPlanes(this->geometry, SEAIndeces, symmetryTolerance);
-    auto improperRotations = Symmetry::findImproperRotations(this->geometry, SEAIndeces, symmetryTolerance);
-
-    std::vector<SymmetryOperation> operations;
-    operations.reserve(properRotations.size() + reflectionPlanes.size() + improperRotations.size() + invertion.size());
-    std::copy(properRotations.begin(), properRotations.end(), std::back_inserter(operations));
-    std::copy(reflectionPlanes.begin(), reflectionPlanes.end(), std::back_inserter(operations));
-    std::copy(improperRotations.begin(), improperRotations.end(), std::back_inserter(operations));
-    std::copy(invertion.begin(), invertion.end(), std::back_inserter(operations));
-
-    this->pointGroup = Symmetry::classifyPointGroup(operations, principalMoments, symmetryTolerance * 10.0);
 }
 
 std::string Molecule::toString() const
@@ -57,7 +41,7 @@ std::string Molecule::toString() const
         ss << "\t" << Utils::atomicNumberToName.at(atom.atomicNumber) << "\t" << atom.coords.x() << "\t"
            << atom.coords.y() << "\t" << atom.coords.z() << "\n";
     }
-    ss << "Point group: " << pointGroup.toString() << "\n";
+    ss << "Point Group: " << pointGroup.toString() << "\n";
     return ss.str();
 }
 

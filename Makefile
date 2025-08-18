@@ -23,7 +23,7 @@ BINDIR = bin
 TARGET = $(BINDIR)/hf_program
 
 # Automatically find all .cpp files in the source directory
-SOURCES = $(wildcard $(SRCDIR)/*.cpp)
+SOURCES = $(wildcard $(SRCDIR)/*.cpp $(SRCDIR)/*/*.cpp)
 
 # Generate corresponding object file names in the object directory
 OBJECTS = $(patsubst $(SRCDIR)/%.cpp, $(OBJDIR)/%.o, $(SOURCES))
@@ -38,16 +38,23 @@ $(TARGET): $(OBJECTS) | $(BINDIR)
 	@echo "Build complete. Run the program with: make run"
 
 # Rule to compile a .cpp source file into a .o object file
-$(OBJDIR)/%.o: $(SRCDIR)/%.cpp | $(OBJDIR)
+$(OBJDIR)/%.o: $(SRCDIR)/%.cpp
+	@mkdir -p $(@D)
 	$(CXX) $(CXXFLAGS) -c -o $@ $<
 
 # Create the output directories if they don't exist
-$(OBJDIR) $(BINDIR):
+$(BINDIR):
 	mkdir -p $@
 
 # Run the program after ensuring it's built
 run: all
 	./$(TARGET)
+
+profile: all
+	./$(TARGET)
+	gprof -b bin/hf_program gmon.out > profiling_output.txt
+	conda run -n sci gprof2dot profiling_output.txt | dot -Tpng -o callgraph.png
+	@echo "Profiling complete. Check profiling_output.txt and callgraph.png for results."
 
 # Clean up build artifacts
 clean:

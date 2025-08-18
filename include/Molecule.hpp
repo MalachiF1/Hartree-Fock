@@ -1,7 +1,7 @@
 #pragma once
 
 #include "AtomicOrbital.hpp"
-#include "Symmetry.hpp"
+#include "Symmetry/PointGroup.hpp"
 #include "Utils.hpp"
 
 #include <string>
@@ -128,7 +128,9 @@ class ElectronRepulsionTensor : public std::vector<double>
 class Molecule
 {
   public:
-    Molecule(int charge, int multiplicity, const std::string& basisName, const std::vector<Atom>& geometry, double symmetryTolerance = 1e-5);
+    Molecule(
+        int charge, int multiplicity, const std::string& basisName, const std::vector<Atom>& geometry, double symmetryTolerance = 1e-5
+    );
 
 
     /**
