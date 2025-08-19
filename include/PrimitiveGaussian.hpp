@@ -16,11 +16,11 @@
 class PrimitiveGaussian
 {
   public:
-    const double exponent;                 // Exponent
-    const double coeff;                    // Contraction coefficient
-    const Vec3 coords;                     // Center coordinates
-    const Eigen::Vector3i angularMomentum; // Angular momentum numbers (x, y, z)
-    const double normConst;                // Normalization constant
+    double exponent;                 // Exponent
+    double coeff;                    // Contraction coefficient
+    Vec3 coords;                     // Center coordinates
+    Eigen::Vector3i angularMomentum; // Angular momentum numbers (x, y, z)
+    double normConst;                // Normalization constant
 
     PrimitiveGaussian(double exponent, double coeff, const Vec3& coords, const Eigen::Vector3i& angularMomentum);
 
@@ -29,6 +29,10 @@ class PrimitiveGaussian
      * @return A string containing the exponent, coefficient, coordinates, angular momentum numbers, and normalization constant.
      */
     std::string toString() const;
+
+    bool operator==(const PrimitiveGaussian& other) const;
+
+    bool operator<(const PrimitiveGaussian& other) const;
 
   private:
     /**

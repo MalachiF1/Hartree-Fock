@@ -45,3 +45,31 @@ std::string PrimitiveGaussian::toString() const
        << "}";
     return ss.str();
 }
+
+
+bool PrimitiveGaussian::operator==(const PrimitiveGaussian& other) const
+{
+    return this->exponent == other.exponent && this->coeff == other.coeff
+        && this->angularMomentum == other.angularMomentum && this->normConst == other.normConst;
+}
+
+bool PrimitiveGaussian::operator<(const PrimitiveGaussian& other) const
+{
+    if (this->exponent != other.exponent)
+        return this->exponent < other.exponent;
+    if (this->coeff != other.coeff)
+        return this->coeff < other.coeff;
+    if (this->angularMomentum.sum() != other.angularMomentum.sum())
+        return this->angularMomentum.sum() < other.angularMomentum.sum();
+    if (this->angularMomentum.x() != other.angularMomentum.x())
+        return this->angularMomentum.x() < other.angularMomentum.x();
+    if (this->angularMomentum.y() != other.angularMomentum.y())
+        return this->angularMomentum.y() < other.angularMomentum.y();
+    if (this->angularMomentum.z() != other.angularMomentum.z())
+        return this->angularMomentum.z() < other.angularMomentum.z();
+    if (this->coords != other.coords)
+        return this->coords.x() < other.coords.x();
+    if (this->coords.y() != other.coords.y())
+        return this->coords.y() < other.coords.y();
+    return this->coords.z() < other.coords.z();
+}

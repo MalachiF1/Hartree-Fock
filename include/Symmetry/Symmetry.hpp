@@ -1,5 +1,6 @@
 #pragma once
 
+#include "AtomicOrbital.hpp"
 #include "Symmetry/PointGroup.hpp"
 #include "Symmetry/SymmetryOperation.hpp"
 #include "Utils.hpp"
@@ -192,8 +193,19 @@ void classifyReflectionPlanes(
     const std::vector<Atom>& geometry,
     std::vector<SymmetryOperation>& reflectionPlanes,
     const std::vector<SymmetryOperation>& properRotations,
+    const std::vector<SymmetryOperation>& improperRotations,
     double tol
 );
+
+/**
+ * Returns the NxN matrix (where N is the number of basis functions) representation of a 3x3 symmetry operation matrix
+ * in the AO basis.
+ *
+ * @param op the SymmetryOperation object to get the AO representation of.
+ * @aos The atomic orbital basis
+ * @tol The tolerance for numerical comparisons
+ */
+Eigen::MatrixXd getAOBasisRep(const SymmetryOperation& op, const std::vector<AtomicOrbital>& aos, double tol);
 
 /**
  * Classifies the point group of a molecular geometry based on its symmetry operations.
@@ -206,5 +218,26 @@ void classifyReflectionPlanes(
  */
 PointGroup classifyPointGroup(const std::vector<Atom>& geometry, const Vec3& principalMoments, double tol);
 
+/**
+ * Classifies a given set of symmetryOperations into classes, where each class contains symmetry operations that
+ * are similarity transformations of one another by another symmetry operation.
+ *
+ * @param operations The symmetry oprations to be classified.
+ * @tol The tolerance for numerical comparisons
+ * @returns A vector of vectors where each inner vector contains SymmetryOperations of the same class.
+ */
+std::vector<std::vector<SymmetryOperation>> getClasses(const std::vector<SymmetryOperation>& operations, double tol);
+
+/**
+ * Given a set of classes of symmetry operations, returns a canonical name for each class.
+ *
+ * @param classes A vector of vectors where each inner vector contains SymmetryOperations of the same class.
+ * @param pointGroup A PointGroup object representing the point group of the molecule.
+ * @param tol The tolerance for numerical comparisons.
+ * @return A vector of strings where each string is the canonical name of the class of the matching index.
+ */
+std::vector<std::string> nameClasses(
+    const std::vector<std::vector<SymmetryOperation>>& classes, const PointGroup& pointGroup, double tol
+);
 
 } // namespace Symmetry

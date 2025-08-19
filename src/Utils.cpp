@@ -67,6 +67,16 @@ int dfact(int n)
     return result;
 }
 
+int fact(int n)
+{
+    if (n < 0)
+        throw std::invalid_argument("Input must be a non-negative integer.");
+
+    int result = 1;
+    for (int i = 2; i <= n; ++i) { result *= i; }
+    return result;
+}
+
 double boys(int m, double T)
 {
     double result;

@@ -42,6 +42,16 @@ std::string AtomicOrbital::toString() const
     return ss.str();
 }
 
+
+bool AtomicOrbital::operator==(const AtomicOrbital& other) const
+{
+    auto primitives1 = this->primitives;
+    auto primitives2 = other.primitives;
+    std::sort(primitives1.begin(), primitives1.end());
+    std::sort(primitives2.begin(), primitives2.end());
+    return (this->center == other.center && this->angularMomentum == other.angularMomentum && primitives1 == primitives2);
+}
+
 double AtomicOrbital::overlap(const AtomicOrbital& ao1, const AtomicOrbital& ao2)
 {
     double total_overlap = 0.0;
@@ -328,4 +338,24 @@ double AtomicOrbital::R(int t, int u, int v, int n, double p, const Vec3& PC, do
     }
 
     return result;
+}
+
+
+bool AtomicOrbital::sameSubshell(const AtomicOrbital& ao1, const AtomicOrbital& ao2)
+{
+    if (ao1.angularMomentum.sum() != ao2.angularMomentum.sum())
+        return false;
+
+    std::vector<std::pair<double, double>> exponentCoeffPairs1;
+    std::vector<std::pair<double, double>> exponentCoeffPairs2;
+
+    for (const auto& primitive : ao1.getPrimitives())
+        exponentCoeffPairs1.emplace_back(primitive.exponent, primitive.coeff);
+    for (const auto& primitive : ao2.getPrimitives())
+        exponentCoeffPairs2.emplace_back(primitive.exponent, primitive.coeff);
+
+    std::sort(exponentCoeffPairs1.begin(), exponentCoeffPairs1.end());
+    std::sort(exponentCoeffPairs2.begin(), exponentCoeffPairs2.end());
+
+    return exponentCoeffPairs1 == exponentCoeffPairs2;
 }

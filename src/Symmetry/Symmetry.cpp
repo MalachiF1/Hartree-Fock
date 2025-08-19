@@ -1,7 +1,9 @@
 #include "Symmetry/Symmetry.hpp"
 
 #include "Eigen/Core"
+#include "Symmetry/PointGroup.hpp"
 #include "Symmetry/SymmetryOperation.hpp"
+#include "Utils.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -34,11 +36,11 @@ bool areEqual(const Vec3& v1, const Vec3& v2, double tol)
 }
 
 
-// // Check if two matrices are equal within a tolerance
-// bool areEqual(const Eigen::Matrix3d& m1, const Eigen::Matrix3d& m2, double tol)
-// {
-//     return (m1 - m2).norm() < tol;
-// }
+// Check if two matrices are equal within a tolerance
+bool areEqual(const Eigen::Matrix3d& m1, const Eigen::Matrix3d& m2, double tol)
+{
+    return (m1 - m2).squaredNorm() < tol * tol;
+}
 
 
 // Check if two doubles are equal within a tolerance
@@ -86,8 +88,8 @@ bool isRegularPolygon(const std::vector<Vec3>& points, const Vec3& center, const
 // Custom hasher for Vec3 to group similar vectors into the same hash bucket.
 struct Vec3Hasher
 {
-    double tolerance;
-    Vec3Hasher(double tol) : tolerance(tol) {}
+    double tol;
+    Vec3Hasher(double tol) : tol(tol) {}
 
     std::size_t operator()(const Vec3& v) const
     {
@@ -95,29 +97,16 @@ struct Vec3Hasher
         Vec3 canonical = v; // already normalized
 
         // Ensure the vector points in a consistent direction.
-        // If the first non-zero component is negative, flip the vector.
-        if (canonical.x() < -tolerance)
-        {
+        // If the first non-zero component is negative, flip the vector (can't be zero vector due to the check in insert()).
+        double* firstNonZero = std::find_if(
+            canonical.data(), canonical.data() + 3, [this](double val) { return !areEqual(val, 0.0, tol); }
+        );
+        if (*firstNonZero < -tol)
             canonical = -canonical;
-        }
-        else if (areEqual(canonical.x(), 0.0, tolerance))
-        {
-            if (canonical.y() < -tolerance)
-            {
-                canonical = -canonical;
-            }
-            else if (areEqual(canonical.y(), 0.0, tolerance))
-            {
-                if (canonical.z() < -tolerance)
-                {
-                    canonical = -canonical;
-                }
-            }
-        }
 
-        long ix = static_cast<long>(std::round(canonical.x() / tolerance));
-        long iy = static_cast<long>(std::round(canonical.y() / tolerance));
-        long iz = static_cast<long>(std::round(canonical.z() / tolerance));
+        long ix = static_cast<long>(std::round(canonical.x() / tol));
+        long iy = static_cast<long>(std::round(canonical.y() / tol));
+        long iz = static_cast<long>(std::round(canonical.z() / tol));
 
         auto hashCombine = [](std::size_t& seed, const long& v)
         { seed ^= std::hash<long> {}(v) + 0x9e3779b9 + (seed << 6) + (seed >> 2); };
@@ -160,8 +149,11 @@ class UniqueVec3Set
             set.insert(v.normalized());
     }
 
+    void erase(const Vec3& v) { set.erase(v.normalized()); }
+
     auto begin() const { return set.begin(); }
     auto end() const { return set.end(); }
+    size_t size() const { return set.size(); }
 };
 
 
@@ -202,7 +194,6 @@ struct PlaneIdentifierHasher
         return (h1 ^ (std::hash<long> {}(h2) + 0x9e3779b9 + (h1 << 6) + (h1 >> 2)));
     }
 };
-
 
 } // namespace
 
@@ -350,9 +341,9 @@ void alignCanonically(
             symmetryOperations.end(),
             [](const SymmetryOperation& a, const SymmetryOperation& b)
             {
-                if (a.name != SymmetryOperation::Cn || a.power != 1)
+                if ((a.name != SymmetryOperation::Cn && a.name != SymmetryOperation::Sn) || a.power != 1)
                     return true;
-                else if (b.name != SymmetryOperation::Cn || b.power != 1)
+                else if ((b.name != SymmetryOperation::Cn && b.name != SymmetryOperation::Sn) || b.power != 1)
                     return false;
                 return (a.n < b.n);
             }
@@ -600,6 +591,33 @@ void alignCanonically(
         op.element = rotationMatrix * op.element;
         op.matrix  = rotationMatrix * op.matrix * rotationMatrix.transpose();
     }
+
+    // Swap sign of rotation axes if necessary
+    switch (pointGroup.name)
+    {
+        case PointGroup::T: [[fallthrough]];
+        case PointGroup::Td: [[fallthrough]];
+        case PointGroup::Th: [[fallthrough]];
+        case PointGroup::O: [[fallthrough]];
+        case PointGroup::Oh:
+        {
+            for (auto& op : symmetryOperations)
+            {
+                if ((op.name == SymmetryOperation::Cn && op.n == 3) || (op.name == SymmetryOperation::Sn && op.n == 6))
+                {
+                    std::vector<double> sortedComponents = {op.element.x(), op.element.y(), op.element.z()};
+                    std::sort(sortedComponents.begin(), sortedComponents.end());
+                    if (sortedComponents[2] < -tol || (sortedComponents[1] > tol && sortedComponents[0] < -tol))
+                    {
+                        op.element = -op.element;
+                        op.power   = op.n - op.power;
+                    }
+                }
+            }
+            break;
+        }
+        default: break;
+    }
 }
 
 
@@ -699,7 +717,7 @@ std::vector<Vec3> getRotationAxesCandidates(const std::vector<std::vector<std::r
                 const Vec3& p2 = group[j].get().coords;
                 for (size_t k = j + 1; k < group.size(); ++k)
                 {
-                    const Vec3& p3 = group[3].get().coords;
+                    const Vec3& p3 = group[k].get().coords;
 
                     Vec3 normal = (p2 - p1).cross(p3 - p1);
                     planeNormals.insert(normal);
@@ -717,6 +735,7 @@ std::vector<Vec3> getRotationAxesCandidates(const std::vector<std::vector<std::r
             {
                 const Vec3& p   = atom.get().coords;
                 double distance = normal.dot(p);
+
                 all_planes[{normal, distance}].push_back(p);
             }
         }
@@ -728,6 +747,44 @@ std::vector<Vec3> getRotationAxesCandidates(const std::vector<std::vector<std::r
                 candidateAxes.insert(planeID.normal);
         }
     }
+
+    // Add a normal to a plane that contains the center of mass and any two non-collinear atoms.
+    // This handles planar Cnh groups.
+    Vec3 atom1 = Vec3(0, 0, 0);
+    for (const auto& group : SEAGroups)
+    {
+        auto nonZeroAtom = std::find_if(
+            group.begin(),
+            group.end(),
+            [&tol](const std::reference_wrapper<const Atom>& atom)
+            { return !areEqual(atom.get().coords, Vec3(0, 0, 0), tol); }
+        );
+
+        if (nonZeroAtom != group.end())
+        {
+            atom1 = nonZeroAtom->get().coords;
+            break;
+        }
+    }
+    for (const auto& group : SEAGroups)
+    {
+        auto atom2 = std::find_if(
+            group.begin(),
+            group.end(),
+            [&atom1, &tol](const std::reference_wrapper<const Atom>& atom)
+            {
+                return (!areEqual(atom.get().coords, Vec3(0, 0, 0), tol) && !areCollinear(atom.get().coords, atom1, tol));
+            }
+        );
+
+        if (atom2 != group.end())
+        {
+            Vec3 normal = atom1.cross(atom2->get().coords);
+            candidateAxes.insert(normal);
+            break;
+        }
+    }
+
 
     return {candidateAxes.begin(), candidateAxes.end()};
 }
@@ -837,7 +894,7 @@ std::vector<SymmetryOperation> findImproperRotations(
             [](size_t currentGCD, size_t count) { return std::gcd(currentGCD, count); }
         );
 
-        for (size_t order = offAxisGCD; order > 2; --order)
+        for (size_t order = 3; order <= offAxisGCD; ++order)
         {
             if (offAxisGCD % order != 0)
                 continue;
@@ -849,7 +906,7 @@ std::vector<SymmetryOperation> findImproperRotations(
             {
                 improperRotations.emplace_back(SymmetryOperation::Sn, improperRotationMatrix, axis, order);
                 // Add all sub-orders of the improper rotation.
-                for (size_t i = 3; i <= (order % 2 == 0 ? order : 2 * order); ++i)
+                for (size_t i = 3; i < (order % 2 == 0 ? order : 2 * order); ++i)
                 {
                     if (order % i == 0 || i % 2 == 0)
                         continue;
@@ -858,8 +915,6 @@ std::vector<SymmetryOperation> findImproperRotations(
                     improperRotationMatrix = createImproperRotationMatrix(axis, i * angle);
                     improperRotations.emplace_back(SymmetryOperation::Sn, improperRotationMatrix, axis, order / gcd, i / gcd);
                 }
-
-                break;
             }
         }
     }
@@ -893,24 +948,38 @@ std::vector<Vec3> getReflectionPlaneNormalsCandidates(
 
     // Add any single plane that containes the center of mass and two non-collinear atoms,
     // this handles planar molcules with no symmetrically equivalent atoms.
-    Vec3 atom1 = SEAGroups[0][0].get().coords;
+    Vec3 atom1 = Vec3(0, 0, 0);
     for (const auto& group : SEAGroups)
     {
-        auto it = std::find_if(
+        auto nonZeroAtom = std::find_if(
+            group.begin(),
+            group.end(),
+            [&tol](const std::reference_wrapper<const Atom>& atom)
+            { return !areEqual(atom.get().coords, Vec3(0, 0, 0), tol); }
+        );
+
+        if (nonZeroAtom != group.end())
+        {
+            atom1 = nonZeroAtom->get().coords;
+            break;
+        }
+    }
+    for (const auto& group : SEAGroups)
+    {
+        auto atom2 = std::find_if(
             group.begin(),
             group.end(),
             [&atom1, &tol](const std::reference_wrapper<const Atom>& atom)
-            { return !areCollinear(atom.get().coords, atom1, tol); }
+            {
+                return (!areEqual(atom.get().coords, Vec3(0, 0, 0), tol) && !areCollinear(atom.get().coords, atom1, tol));
+            }
         );
 
-        if (it != group.end())
+        if (atom2 != group.end())
         {
-            Vec3 normal = atom1.cross(it->get().coords);
-            if (normal.squaredNorm() > tol * tol)
-            {
-                uniqueNormals.insert(normal);
-                break;
-            }
+            Vec3 normal = atom1.cross(atom2->get().coords);
+            uniqueNormals.insert(normal);
+            break;
         }
     }
 
@@ -937,6 +1006,7 @@ void classifyReflectionPlanes(
     const std::vector<Atom>& geometry,
     std::vector<SymmetryOperation>& reflectionPlanes,
     const std::vector<SymmetryOperation>& properRotations,
+    const std::vector<SymmetryOperation>& improperRotations,
     double tol
 )
 {
@@ -950,18 +1020,27 @@ void classifyReflectionPlanes(
     }
 
     // find the principal rotation axis
-    auto principalRotation = std::max_element(
-        properRotations.begin(),
-        properRotations.end(),
-        [](const SymmetryOperation& r1, const SymmetryOperation& r2)
+    auto highestN = [](const SymmetryOperation& r1, const SymmetryOperation& r2)
+    {
+        if (r1.power != 1)
+            return true;
+        else if (r2.power != 1)
+            return false;
+        return r1.n < r2.n;
+    };
+
+    auto highestCn            = std::max_element(properRotations.begin(), properRotations.end(), highestN);
+    auto principalRotation    = highestCn;
+    bool useImproperRotations = false;
+    if (!improperRotations.empty())
+    {
+        auto highestSn = std::max_element(improperRotations.begin(), improperRotations.end(), highestN);
+        if (highestSn->n > highestCn->n)
         {
-            if (r1.power != 1)
-                return true;
-            else if (r2.power != 1)
-                return false;
-            return r1.n < r2.n;
+            principalRotation    = highestSn;
+            useImproperRotations = true;
         }
-    );
+    }
 
     size_t principalRotationOrder     = principalRotation->n;
     const Vec3& principalRotationAxis = principalRotation->element;
@@ -969,14 +1048,19 @@ void classifyReflectionPlanes(
     // check if multiple principal rotation axes are present
     bool hasMultiplePrincipalAxes = false;
 
+    const std::vector<SymmetryOperation>& rotationsOfInterset = (useImproperRotations) ? improperRotations : properRotations;
     auto secondPrincipalAxis = std::find_if(
-        properRotations.begin(),
-        properRotations.end(),
+        rotationsOfInterset.begin(),
+        rotationsOfInterset.end(),
         [&principalRotationAxis, &principalRotationOrder, &tol](const SymmetryOperation& rotation)
-        { return (rotation.n == principalRotationOrder && !areCollinear(rotation.element, principalRotationAxis, tol)); }
+        {
+            return (
+                rotation.n == principalRotationOrder && rotation.power == 1
+                && !areCollinear(rotation.element, principalRotationAxis, tol)
+            );
+        }
     );
-
-    if (secondPrincipalAxis != properRotations.end())
+    if (secondPrincipalAxis != rotationsOfInterset.end())
         hasMultiplePrincipalAxes = true;
 
     // Get C2 axes perpendicular to the principal rotation axis.
@@ -1048,12 +1132,43 @@ void classifyReflectionPlanes(
         );
     }
 
+
+    // Special case for Cnv where n > 2 and n is even.
+    if (principalRotationOrder > 2 && principalRotationOrder % 2 == 0 && !hasMultiplePrincipalAxes
+        && perpendicularC2s.empty() && !hasInversion(geometry, tol))
+    {
+        // sigma_v planes go through highest number of atoms
+        size_t maxAtomsIntersected = 0;
+        for (const auto& reflection : reflectionPlanes)
+        {
+            size_t atomsIntersected = std::count_if(
+                geometry.begin(),
+                geometry.end(),
+                [&reflection, &tol](const Atom& atom) { return areOrthogonal(atom.coords, reflection.element, tol); }
+            );
+            maxAtomsIntersected = std::max(maxAtomsIntersected, atomsIntersected);
+        }
+        for (auto& reflection : reflectionPlanes)
+        {
+            size_t atomsIntersected = std::count_if(
+                geometry.begin(),
+                geometry.end(),
+                [&reflection, &tol](const Atom& atom) { return areOrthogonal(atom.coords, reflection.element, tol); }
+            );
+            if (atomsIntersected == maxAtomsIntersected)
+                reflection.name = SymmetryOperation::sigma_v;
+            else
+                reflection.name = SymmetryOperation::sigma_d;
+        }
+        return;
+    }
+
     for (auto& reflection : reflectionPlanes)
     {
         // Check if the reflection plane is a sigma_h plane.
         if (hasMultiplePrincipalAxes)
         {
-            if (principalRotationOrder == 3)
+            if (highestCn->n == 3)
             {
                 auto orthogonalC2 = std::find_if(
                     properRotations.begin(),
@@ -1067,7 +1182,7 @@ void classifyReflectionPlanes(
                     continue;
                 }
             }
-            else if (principalRotationOrder == 4)
+            else if (highestCn->n == 4)
             {
                 auto orthogonalC4 = std::find_if(
                     properRotations.begin(),
@@ -1178,7 +1293,7 @@ PointGroup classifyPointGroup(const std::vector<Atom>& geometry, const Vec3& pri
     std::vector<SymmetryOperation> improperRotations = findImproperRotations(geometry, SEAGroups, candidateRotationAxes, tol);
     std::vector<SymmetryOperation> reflectionPlanes = findReflectionPlanes(geometry, candidateReflectionPlaneNormals, tol);
 
-    classifyReflectionPlanes(geometry, reflectionPlanes, properRotations, tol);
+    classifyReflectionPlanes(geometry, reflectionPlanes, properRotations, improperRotations, tol);
 
     bool hasInv = hasInversion(geometry, tol);
 
@@ -1334,7 +1449,7 @@ PointGroup classifyPointGroup(const std::vector<Atom>& geometry, const Vec3& pri
 
     if (numOfC2Axes == 3)
     {
-        if (hasSigmaHPlane)
+        if (!reflectionPlanes.empty())
             pointGroupName = PointGroup::Dnh;
         else
             pointGroupName = PointGroup::Dn;
@@ -1350,6 +1465,125 @@ PointGroup classifyPointGroup(const std::vector<Atom>& geometry, const Vec3& pri
         // We alrady handled C1, Cs, Ci and S2n
     }
     return PointGroup(pointGroupName, 2, allOperations);
+}
+
+
+std::vector<std::vector<SymmetryOperation>> getClasses(const std::vector<SymmetryOperation>& operations, double tol)
+{
+    std::vector<std::vector<SymmetryOperation>> classes;
+    std::vector<bool> isClassified(operations.size(), false);
+
+    for (size_t i = 0; i < operations.size(); ++i)
+    {
+        if (isClassified[i])
+            continue;
+
+        std::vector<SymmetryOperation> operationsClass;
+        operationsClass.push_back(operations[i]);
+        isClassified[i] = true;
+
+        auto A = operations[i].matrix;
+
+        for (size_t j = 0; j < operations.size(); ++j)
+        {
+            auto X = operations[j].matrix;
+            auto B = X.transpose() * A * X;
+            for (size_t k = i + 1; k < operations.size(); ++k)
+            {
+                if (!isClassified[k] && areEqual(B, operations[k].matrix, tol))
+                {
+                    operationsClass.push_back(operations[k]);
+                    isClassified[k] = true;
+                    break;
+                }
+            }
+        }
+
+        classes.push_back(operationsClass);
+    }
+
+    return classes;
+}
+
+
+std::vector<std::string> nameClasses(
+    const std::vector<std::vector<SymmetryOperation>>& classes, const PointGroup& pointGroup, double tol
+)
+{
+    std::vector<std::string> classNames;
+
+    for (const auto& operationsClass : classes)
+    {
+        size_t classSize                 = operationsClass.size();
+        SymmetryOperation representative = operationsClass[0];
+        for (const auto& op : operationsClass)
+        {
+            if (op.n < representative.n || (op.n == representative.n && op.power < representative.power))
+                representative = op;
+        }
+        std::string className = (classSize > 1 ? std::to_string(classSize) : "") + representative.getName();
+
+        // handle some special cases
+        if (pointGroup.name == PointGroup::Cnv && pointGroup.n == 2 && className == "sigmav") // C2v
+        {
+            if (areCollinear(representative.element, Vec3(1, 0, 0), tol))
+                className = "sigmayz";
+            else if (areCollinear(representative.element, Vec3(0, 1, 0), tol))
+                className = "sigmaxz";
+            else if (areCollinear(representative.element, Vec3(0, 0, 1), tol))
+                className = "sigmaxy";
+        }
+        else if (pointGroup.name == PointGroup::Dnh && pointGroup.n == 2 && (className == "sigma")) // D2h
+        {
+            if (areCollinear(representative.element, Vec3(0, 0, 1), tol))
+                className = "sigmaxy";
+            else if (areCollinear(representative.element, Vec3(0, 1, 0), tol))
+                className = "sigmaxz";
+            else if (areCollinear(representative.element, Vec3(1, 0, 0), tol))
+                className = "sigmayz";
+        }
+
+        if ((pointGroup.name == PointGroup::Dn || pointGroup.name == PointGroup::Dnh || pointGroup.name == PointGroup::Dnd)
+            && representative.name == SymmetryOperation::Cn && representative.n == 2) // Dn
+        {
+            if (pointGroup.n == 2 && pointGroup.name != PointGroup::Dnd) // D2 or D2h
+            {
+                if (areCollinear(representative.element, Vec3(1, 0, 0), tol))
+                    className = "C2x";
+                else if (areCollinear(representative.element, Vec3(0, 1, 0), tol))
+                    className = "C2y";
+                else if (areCollinear(representative.element, Vec3(0, 0, 1), tol))
+                    className = "C2z";
+            }
+            else // Dn or D2h, n != 2
+            {
+                bool isC2Prime = false;
+                for (const auto& c2 : operationsClass)
+                {
+                    if (areEqual(c2.element, Vec3(1, 0, 0), tol))
+                    {
+                        className += "'";
+                        isC2Prime = true;
+                        break;
+                    }
+                }
+
+                if (!isC2Prime && !areEqual(representative.element, Vec3(0, 0, 1), tol))
+                    className += "''";
+            }
+        }
+
+        if (pointGroup.name == PointGroup::O && className == "6C2") // O
+            className = "6C2'";
+
+        // if (pointGroup.name == PointGroup::Ih && className == "15sigmad") // Ih
+        //     className = "15sigma";
+
+
+        classNames.push_back(className);
+    }
+
+    return classNames;
 }
 
 
@@ -1389,6 +1623,108 @@ bool areGeometriesSuperimposable(const std::vector<Atom>& geometry1, const std::
     return true;
 }
 
+
+Eigen::MatrixXd getAOBasisRep(const SymmetryOperation& op, const std::vector<AtomicOrbital>& aos, double tol)
+{
+    size_t n_aos             = aos.size();
+    Eigen::MatrixXd D        = Eigen::MatrixXd::Zero(n_aos, n_aos);
+    const Eigen::Matrix3d& R = op.matrix;
+
+    for (size_t i = 0; i < n_aos; ++i)
+    {
+        const AtomicOrbital& ao                = aos[i];
+        const Vec3& center                     = ao.center;
+        const Eigen::Vector3i& angularMomentum = ao.angularMomentum;
+
+        Vec3 newCenter = R * center;
+
+        // get indicies of atomic orbitals that are on the new center after the symmetry operation
+        std::vector<size_t> AOsOnNewCenter;
+        for (size_t j = 0; j < n_aos; ++j)
+        {
+            if (areEqual(aos[j].center, newCenter, tol))
+                AOsOnNewCenter.push_back(j);
+        }
+
+        if (AOsOnNewCenter.empty())
+            continue;
+
+        int L = angularMomentum.sum();
+
+        std::vector<Vec3> components;
+        if (L > 0)
+        {
+            components.reserve(L);
+            for (int k = 0; k < 3; ++k)
+            {
+                for (int l = 0; l < angularMomentum[k]; ++l) { components.emplace_back(R * Eigen::Vector3d::Unit(k)); }
+            }
+        }
+
+        for (size_t j : AOsOnNewCenter)
+        {
+            if (!AtomicOrbital::sameSubshell(aos[j], ao))
+                continue;
+
+            const Eigen::Vector3i& targetAM = aos[j].angularMomentum;
+
+            if (L == 0)
+                D(j, i) = 1.0;
+            else
+            {
+                // recursive function to calculate the coefficient
+                std::function<double(size_t, const Eigen::Vector3i&, double)> calculateCartesianCoefficient =
+                    [&](size_t currentIndex, const Eigen::Vector3i& currentAMCounts, double currentProduct) -> double
+                {
+                    // Base case: All compnents have been processed
+                    if (currentIndex == components.size())
+                    {
+                        // If the accumulated angular momentum matches the target, return the product.
+                        if (currentAMCounts == targetAM)
+                            return currentProduct;
+                        else
+                            return 0.0; // Otherwise, this path doesn't contribute.
+                    }
+
+                    double sumOfContributions = 0.0;
+
+                    const Vec3& comp = components[currentIndex];
+
+                    // Try to assign the current compnent's x-coordinate
+                    if (currentAMCounts.x() < targetAM.x())
+                    {
+                        sumOfContributions += calculateCartesianCoefficient(
+                            currentIndex + 1, currentAMCounts + Eigen::Vector3i(1, 0, 0), currentProduct * comp.x()
+                        );
+                    }
+
+                    // Try to assign the current component's y-coordinate
+                    if (currentAMCounts.y() < targetAM.y())
+                    {
+                        sumOfContributions += calculateCartesianCoefficient(
+                            currentIndex + 1, currentAMCounts + Eigen::Vector3i(0, 1, 0), currentProduct * comp.y()
+                        );
+                    }
+
+                    // Try to assign the current component's z-coordinate
+                    if (currentAMCounts.z() < targetAM.z())
+                    {
+                        sumOfContributions += calculateCartesianCoefficient(
+                            currentIndex + 1, currentAMCounts + Eigen::Vector3i(0, 0, 1), currentProduct * comp.z()
+                        );
+                    }
+
+                    return sumOfContributions;
+                };
+
+                D(j, i) = calculateCartesianCoefficient(0, Eigen::Vector3i::Zero(), 1.0);
+            }
+        }
+    }
+    return D;
+}
+
+
 bool isSymmetryOperation(const std::vector<Atom>& geometry, const Eigen::Matrix3d& operation, double tol)
 {
     std::vector<Atom> transformedGeometry;
@@ -1398,6 +1734,7 @@ bool isSymmetryOperation(const std::vector<Atom>& geometry, const Eigen::Matrix3
 
     return areGeometriesSuperimposable(geometry, transformedGeometry, tol);
 }
+
 
 Eigen::Matrix3d createRotationMatrix(const Vec3& axis, double angle)
 {
@@ -1423,10 +1760,12 @@ Eigen::Matrix3d createRotationMatrix(const Vec3& axis, double angle)
     return R;
 }
 
+
 Eigen::Matrix3d createReflectionMatrix(const Vec3& normal)
 {
     return Eigen::Matrix3d::Identity() - 2.0 * normal.normalized() * normal.normalized().transpose();
 }
+
 
 Eigen::Matrix3d createImproperRotationMatrix(const Vec3& axis, double angle)
 {
@@ -1434,6 +1773,7 @@ Eigen::Matrix3d createImproperRotationMatrix(const Vec3& axis, double angle)
     Eigen::Matrix3d reflection = createReflectionMatrix(axis);
     return reflection * rotation; // Combine rotation and inversion
 }
+
 
 bool hasInversion(const std::vector<Atom>& geometry, double tol)
 {

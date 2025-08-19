@@ -26,6 +26,8 @@ class AtomicOrbital
      */
     std::string toString() const;
 
+    bool operator==(const AtomicOrbital& other) const;
+
     /**
      * Get the primitive gaussians that make up the atomic orbital.
      * @return the reference to the vector of primitive gaussians that make up the atomic orbital.
@@ -72,6 +74,8 @@ class AtomicOrbital
     static double electronRepulsion(
         const AtomicOrbital& ao1, const AtomicOrbital& ao2, const AtomicOrbital& ao3, const AtomicOrbital& ao4
     );
+
+    static bool sameSubshell(const AtomicOrbital& ao1, const AtomicOrbital& ao2);
 
 
   private:

@@ -13,6 +13,8 @@ using Vec3 = Eigen::Vector3d;
  */
 struct Atom
 {
+    Atom() = default;
+    Atom(unsigned atomicNumber, const Vec3& coords) : atomicNumber(atomicNumber), coords(coords) {}
     unsigned atomicNumber;
     Vec3 coords;
 };
@@ -47,6 +49,14 @@ struct Shell
  * @return The double factorial of n, or 1 if n is -1.
  */
 int dfact(int n);
+
+/**
+ * Computes the factorial of an integer n. This is simple itterative implementation, mosty for small n.
+ *
+ * @param n The integer for which to compute the factorial.
+ * @return The factorial of n
+ */
+int fact(int n);
 
 /**
  * Computes the Boys function F_m(T) using the hypergeometric function.
