@@ -1,29 +1,31 @@
 #include "DIIS.hpp"
 
-DIIS::DIIS(size_t maxSize) : maxSize(maxSize) {}
-
-
-void DIIS::update(const Eigen::MatrixXd& F, const Eigen::MatrixXd& D, const Eigen::MatrixXd& S, const Eigen::MatrixXd& X)
+DIIS::DIIS(size_t maxSize) : maxSize(maxSize)
 {
-    // Add the new error vector and Fock matrix to the history.
-    errorVectors.emplace_back(X.transpose() * (F * D * S - S * D * F) * X);
-    fockMatricesOrtho.emplace_back(X.transpose() * F * X);
-
-    // If the storage exceeds the maximum size, remove the oldest entry.
-    if (errorVectors.size() > maxSize)
-    {
-        errorVectors.erase(errorVectors.begin());
-        fockMatricesOrtho.erase(fockMatricesOrtho.begin());
-    }
+    errorVectors.reserve(maxSize);
+    fockMatrices.reserve(maxSize);
 }
 
 
-Eigen::MatrixXd DIIS::extrapolate(const Eigen::MatrixXd& orthoF)
+void DIIS::update(const Eigen::MatrixXd& F, const Eigen::MatrixXd& errorVector)
+{
+    // If the storage exceeds the maximum size, remove the oldest entry.
+    if (errorVectors.size() >= maxSize)
+    {
+        errorVectors.erase(errorVectors.begin());
+        fockMatrices.erase(fockMatrices.begin());
+    }
+
+    // Add the new error vector and Fock matrix to the history.
+    errorVectors.emplace_back(errorVector);
+    fockMatrices.emplace_back(F);
+}
+
+
+Eigen::MatrixXd DIIS::extrapolate(const Eigen::MatrixXd& F)
 {
     if (errorVectors.empty())
-    {
-        return orthoF; // Cannot extrapolate without history.
-    }
+        return F; // Cannot extrapolate without history.
 
     Eigen::MatrixXd B = buildBMatrix();
     Eigen::VectorXd b = Eigen::VectorXd::Zero(B.rows());
@@ -33,8 +35,8 @@ Eigen::MatrixXd DIIS::extrapolate(const Eigen::MatrixXd& orthoF)
     Eigen::VectorXd coeffs = B.colPivHouseholderQr().solve(b);
 
     // Use the coefficients to form the new extrapolated Fock matrix.
-    Eigen::MatrixXd newF = Eigen::MatrixXd::Zero(orthoF.rows(), orthoF.cols());
-    for (size_t i = 0; i < fockMatricesOrtho.size(); ++i) { newF += coeffs(i) * fockMatricesOrtho[i]; }
+    Eigen::MatrixXd newF = Eigen::MatrixXd::Zero(F.rows(), F.cols());
+    for (size_t i = 0; i < fockMatrices.size(); ++i) { newF += coeffs(i) * fockMatrices[i]; }
 
     return newF;
 }
@@ -66,8 +68,7 @@ Eigen::MatrixXd DIIS::buildBMatrix() const
 double DIIS::getErrorNorm() const
 {
     if (errorVectors.empty())
-    {
-        return 0.0; // No error to report.
-    }
+        return 0.0;
+
     return errorVectors.back().norm();
 }

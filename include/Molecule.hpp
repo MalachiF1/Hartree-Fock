@@ -5,6 +5,7 @@
 #include "Utils.hpp"
 
 #include <string>
+#include <system_error>
 #include <vector>
 
 
@@ -129,7 +130,12 @@ class Molecule
 {
   public:
     Molecule(
-        int charge, int multiplicity, const std::string& basisName, const std::vector<Atom>& geometry, double symmetryTolerance = 1e-5
+        int charge,
+        int multiplicity,
+        const std::string& basisName,
+        const std::vector<Atom>& geometry,
+        bool detectSymmetry      = true,
+        double symmetryTolerance = 1e-5
     );
 
 
@@ -186,8 +192,11 @@ class Molecule
     size_t getBasisFunctionCount() const { return basisFunctionCount; }
     int getCharge() const { return charge; }
     int getMultiplicity() const { return multiplicity; }
+    double getSymmetryTol() const { return symmetryTolerance; }
     size_t getElectronCount() const { return electronCount; }
     const std::vector<Atom>& getGeometry() const { return geometry; }
+    const PointGroup& getPointGroup() const { return pointGroup; }
+    std::vector<std::string> getAOLabels() const;
 
   private:
     size_t basisFunctionCount; // number of atomic orbitals in the molecule
@@ -208,6 +217,7 @@ class Molecule
 
     const int charge;
     const int multiplicity;
+    const double symmetryTolerance;
     std::vector<Atom> geometry;
     size_t electronCount;
     std::vector<AtomicOrbital> atomicOrbitals;

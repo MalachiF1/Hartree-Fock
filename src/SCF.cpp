@@ -4,7 +4,9 @@
 #include "Utils.hpp"
 
 #include <cmath>
+#include <cstdlib>
 #include <iomanip>
+#include <ios>
 #include <iostream>
 
 SCF::SCF(const Molecule& molecule) : molecule(molecule) {}
@@ -28,11 +30,8 @@ void SCF::run(
     // Get the initial guess density.
     this->computeInitialGuessDensity();
 
-    if (useDIIS)
-    {
-        // Initialize the DIIS handler with the specified maximum size.
+    if (useDIIS) // Initialize the DIIS handler with the specified maximum size.
         diis_handler = std::make_unique<DIIS>(DIISmaxSize);
-    }
 
     std::cout << "\n--- Starting SCF Iterations ---\n" << std::endl;
 
@@ -52,21 +51,17 @@ void SCF::run(
         // Store the error vector and fock matrix for DIIS if applicable.
         if (useDIIS)
         {
-            diis_handler->update(this->F, this->D, this->S, this->X);
+            // Calculate the commutator of the fock and density matrices as the error vector.
+            Eigen::MatrixXd errorVector = this->F * this->D * this->S - this->S * this->D * this->F;
+            diis_handler->update(this->F, errorVector);
         }
 
         // Diagonalize the Fock matrix and compute the new density and coefficients.
-        if (useDIIS && iteration >= DIISstart)
-        {
-            // Extrapolate the orthogonal Fock matrix using DIIS.
-            Eigen::MatrixXd F_prime = diis_handler->extrapolate(this->F);
 
-            this->diagonalizeAndUpdate(F_prime);
-        }
-        else
-        {
-            this->diagonalizeAndUpdate();
-        }
+        if (useDIIS && iteration >= DIISstart) // Extrapolate the orthogonal Fock matrix using DIIS.
+            this->F = diis_handler->extrapolate(this->F);
+
+        this->diagonalizeAndUpdate();
 
         // Calculate the change in energy and density.
         double dE = std::abs(this->electronicEnergy - lastElectronicEnergy);
@@ -74,18 +69,14 @@ void SCF::run(
 
         // Print the current iteration results.
         if (useDIIS)
-        {
             this->printIteration(iteration + 1, dE, dD, diis_handler->getErrorNorm());
-        }
         else
-        {
             this->printIteration(iteration + 1, dE, dD);
-        }
 
         // Check for convergence.
         if (dE < energyTol && dD < densityTol && (!useDIIS || diis_handler->getErrorNorm() < DIISErrorTol))
         {
-            // If converged, print the final results and exit.
+            // basis If converged, print the final results and exit.
             this->printFinalResults(true);
             return;
         }
@@ -110,16 +101,16 @@ void SCF::initialize(double schwartzThreshold, bool direct)
     this->V             = molecule.nuclearAttractionMatrix();
     this->h             = this->T + this->V;
 
+    // Calculate the overlap and orthogonalization matrices.
+    this->S = molecule.overlapMatrix();
+    this->X = inverseSqrtMatrix(this->S);
+
     // Calculate two-electron integrals (only if not using direct method).
     if (!direct)
         this->Vee = molecule.electronRepulsionTensor(schwartzThreshold);
     else
         // If using direct method, only pre-calculate the Schwartz screening matrix.
         this->Q = molecule.schwartzScreeningMatrix();
-
-    // Calculate the overlap and orthogonalization matrices.
-    this->S = molecule.overlapMatrix();
-    this->X = inverseSqrtMatrix(this->S);
 }
 
 
@@ -130,8 +121,10 @@ void SCF::computeInitialGuessDensity()
 
     // Diagonalize the initial Fock matrix to get guess orbitals.
     Eigen::MatrixXd F_prime = this->X.transpose() * this->F * this->X;
+
     Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> solver(F_prime);
-    this->C = this->X * solver.eigenvectors();
+    this->C           = this->X * solver.eigenvectors();
+    this->eigenvalues = solver.eigenvalues();
 
     // Form the density matrix from the occupied orbitals.
     Eigen::MatrixXd C_occ = this->C.leftCols(this->occupiedCount);
@@ -169,15 +162,14 @@ void SCF::buildFockMatrix()
             }
         }
     }
-    // The full Fock matrix is the core Hamiltonian plus the G matrix.
     this->F = this->h + G;
 }
 
 void SCF::buildFockMatrix(double schwartzThreshold, double densityThreshold)
 {
-    size_t N_ao       = this->basisCount;
-    Eigen::MatrixXd G = Eigen::MatrixXd::Zero(N_ao, N_ao);
-    const auto& AOs   = this->molecule.getAtomicOrbitals();
+    const size_t& N_ao = this->basisCount;
+    Eigen::MatrixXd G  = Eigen::MatrixXd::Zero(N_ao, N_ao);
+    const auto& AOs    = this->molecule.getAtomicOrbitals();
 
 #pragma omp parallel
     {
@@ -279,37 +271,18 @@ void SCF::buildFockMatrix(double schwartzThreshold, double densityThreshold)
     this->F = this->h + G;
 }
 
+
 void SCF::diagonalizeAndUpdate()
 {
     // Transform the Fock matrix to the orthogonal basis.
     Eigen::MatrixXd F_prime = this->X.transpose() * this->F * this->X;
 
-    // Find the eigenvalues and eigenvectors.
     Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> solver(F_prime);
-
-    // Transform the eigenvectors back to the original basis.
-    this->C = this->X * solver.eigenvectors();
-
-    // Form the new density matrix from the occupied orbitals.
+    this->C               = this->X * solver.eigenvectors();
+    this->eigenvalues     = solver.eigenvalues();
     Eigen::MatrixXd C_occ = this->C.leftCols(this->occupiedCount);
     this->D               = 2 * C_occ * C_occ.transpose();
 
-    // Calculate the new electronic energy.
-    this->electronicEnergy = (this->D.array() * (this->h + this->F).array()).sum() * 0.5;
-}
-
-
-void SCF::diagonalizeAndUpdate(const Eigen::MatrixXd& F_prime)
-{
-    // Find the eigenvalues and eigenvectors.
-    Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> solver(F_prime);
-
-    // Transform the eigenvectors back to the original basis.
-    this->C = this->X * solver.eigenvectors();
-
-    // Form the new density matrix from the occupied orbitals.
-    Eigen::MatrixXd C_occ = this->C.leftCols(this->occupiedCount);
-    this->D               = 2 * C_occ * C_occ.transpose();
 
     // Calculate the new electronic energy.
     this->electronicEnergy = (this->D.array() * (this->h + this->F).array()).sum() * 0.5;
@@ -319,32 +292,168 @@ void SCF::diagonalizeAndUpdate(const Eigen::MatrixXd& F_prime)
 void SCF::printIteration(int iter, double dE, double dD) const
 {
     std::cout << "Iteration " << std::setw(3) << iter << ": "
-              << " | dE = " << std::scientific << dE << " | dD = " << dD << std::endl;
+              << " | ΔE = " << std::scientific << dE << " | ΔD = " << dD << std::endl;
 }
 
 
 void SCF::printIteration(int iter, double dE, double dD, double DIISError) const
 {
     std::cout << "Iteration " << std::setw(3) << iter << ": "
-              << " | dE = " << std::scientific << dE << " | dD = " << dD << " | DIIS error = " << DIISError << std::endl;
+              << " | ΔE = " << std::scientific << dE << " | ΔD = " << dD << " | DIIS error = " << DIISError << std::endl;
 }
 
 
 void SCF::printFinalResults(bool converged) const
 {
+    std::stringstream ss;
+    ss << std::left;
     if (converged)
-    {
-        std::cout << "\nSCF converged!" << std::endl;
-    }
+        ss << "\nSCF converged!\n";
     else
-    {
-        std::cout << "\nWarning: SCF did not converge!" << std::endl;
-    }
+        ss << "\nWarning: SCF did not converge!\n";
 
     double totalEnergy = this->electronicEnergy + this->nuclearEnergy;
-    std::cout << "\n--- SCF Results ---" << std::endl;
-    std::cout << std::fixed << std::setprecision(10);
-    std::cout << "Electronic Energy: " << this->electronicEnergy << " Hartree" << std::endl;
-    std::cout << "Nuclear Repulsion: " << this->nuclearEnergy << " Hartree" << std::endl;
-    std::cout << "Total SCF Energy:  " << totalEnergy << " Hartree" << std::endl;
+    ss << "\n--- SCF Results ---\n";
+    ss << std::fixed << std::setprecision(10);
+    ss << "Electronic Energy: " << this->electronicEnergy << " Hartree\n";
+    ss << "Nuclear Repulsion: " << this->nuclearEnergy << " Hartree\n";
+    ss << "Total SCF Energy:  " << totalEnergy << " Hartree\n";
+
+    std::vector<std::string> aoLabels = this->molecule.getAOLabels();
+
+    ss << "\n";
+    for (size_t i = 0; i < 99; ++i) { ss << "-"; }
+    ss << "\n";
+    size_t whitespaceWidth = (99 - std::string("Orbital Energies (a.u.)").length()) / 2;
+    ss << std::string(whitespaceWidth, ' ') << "Orbital Energies (a.u.)" << std::string(whitespaceWidth, ' ') << "\n";
+    for (size_t i = 0; i < 99; ++i) { ss << "-"; }
+    ss << "\n";
+
+
+    ss << "\n-- Occupied --\n";
+    ss << printShortMOs(this->eigenvalues.head(this->occupiedCount), 5, 8);
+    ss << "-- Virtual --\n";
+    ss << printShortMOs(this->eigenvalues.tail(this->basisCount - this->occupiedCount), 5, 8);
+    for (size_t i = 0; i < 99; ++i) { ss << "-"; }
+    ss << "\n";
+
+    ss << "\n";
+    for (size_t i = 0; i < 99; ++i) { ss << "-"; }
+    ss << "\n";
+    whitespaceWidth = (99 - std::string("Molecular Orbital Coefficients").length()) / 2;
+    ss << std::string(whitespaceWidth, ' ') << "Molecular Orbital Coefficients" << std::string(whitespaceWidth, ' ')
+       << "\n";
+    for (size_t i = 0; i < 99; ++i) { ss << "-"; }
+    ss << "\n";
+
+    ss << "Occupied orbitals:\n";
+    ss << "‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾\n";
+    ss << printFullMOs(this->C.leftCols(this->occupiedCount), this->eigenvalues.head(this->occupiedCount), aoLabels, 5, 5);
+
+    ss << "\nVirtual orbitals:\n";
+    ss << "‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾\n";
+    ss << printFullMOs(
+        this->C.rightCols(this->basisCount - this->occupiedCount),
+        this->eigenvalues.tail(this->basisCount - this->occupiedCount),
+        aoLabels,
+        5,
+        5
+    );
+    for (size_t i = 0; i < 99; ++i) { ss << "-"; }
+
+    std::cout << ss.str() << std::endl;
+}
+
+std::string SCF::printShortMOs(const Eigen::VectorXd& eigenvalues, size_t precision, size_t MOsPerRow) const
+{
+    const int width = 6 + precision;
+
+    auto format = [&precision, &width](double num) -> std::string
+    {
+        std::stringstream ss;
+
+        if (std::signbit(num))
+            ss << "-";
+        else
+            ss << " ";
+
+        ss << std::scientific << std::left << std::setw(width - 1) << std::setprecision(precision) << std::abs(num);
+
+        return ss.str();
+    };
+
+    std::stringstream ss;
+    ss << std::left;
+
+    size_t rowsLimit = std::ceil(static_cast<double>(eigenvalues.size()) / static_cast<double>(MOsPerRow));
+    for (size_t k = 0; k < rowsLimit; ++k)
+    {
+        size_t startIndex = k * MOsPerRow;
+        size_t numMOs     = eigenvalues.size();
+        size_t endIndex   = std::min(startIndex + MOsPerRow, numMOs);
+
+        for (size_t i = startIndex; i < endIndex; ++i) { ss << format(eigenvalues(i)) << std::setw(2) << " "; }
+        ss << "\n";
+    }
+
+    return ss.str();
+}
+
+std::string SCF::printFullMOs(
+    const Eigen::MatrixXd& MOs,
+    const Eigen::VectorXd& eigenvalues,
+    const std::vector<std::string>& aoLabels,
+    size_t precision,
+    size_t MOsPerRow
+) const
+{
+    const int width = 10 + precision;
+
+    auto format = [&precision, &width](double num) -> std::string
+    {
+        std::stringstream ss;
+
+        if (std::signbit(num))
+            ss << "-";
+        else
+            ss << " ";
+
+        ss << std::scientific << std::left << std::setw(width - 1) << std::setprecision(precision) << std::abs(num);
+
+        return ss.str();
+    };
+
+    std::stringstream ss;
+    ss << std::left;
+
+    size_t rowsLimit = std::ceil(static_cast<double>(MOs.cols()) / static_cast<double>(MOsPerRow));
+    for (size_t k = 0; k < rowsLimit; ++k)
+    {
+        size_t startIndex = k * MOsPerRow;
+        size_t numMOs     = MOs.cols();
+        size_t endIndex   = std::min(startIndex + MOsPerRow, numMOs);
+        ss << std::setw(width) << " " << "\t";
+        for (size_t i = startIndex; i < endIndex; ++i)
+        {
+            double whitespaceWidth = precision + 8;
+            ss << std::string(std::floor((whitespaceWidth - 1) / 2), ' ');
+            ss << i + 1;
+            ss << std::string(std::ceil((whitespaceWidth - 1) / 2), ' ') << "\t";
+        }
+        ss << "\n";
+
+        ss << std::setw(width) << "eigenvalues:" << "\t";
+        for (size_t i = startIndex; i < endIndex; ++i) { ss << format(eigenvalues(i)) << "\t"; }
+        ss << "\n";
+
+        for (size_t i = 0; i < this->basisCount; ++i)
+        {
+            ss << std::setw(width) << aoLabels[i] << "\t";
+            for (size_t j = startIndex; j < endIndex; ++j) { ss << format(MOs(i, j)) << "\t"; }
+            ss << "\n";
+        }
+        ss << "\n";
+    }
+
+    return ss.str();
 }

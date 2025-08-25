@@ -19,7 +19,7 @@ class AtomicOrbital
     const Vec3 center; // center of the atomic orbital (the nucleus position on which the orbital is centered)
     Eigen::Vector3i angularMomentum; // angular momentum quantum numbers for the orbital (l, m, n)
 
-    AtomicOrbital(const Vec3& center, const std::vector<PrimitiveGaussian>& primitives);
+    AtomicOrbital(const Vec3& center, const Eigen::Vector3i& angularMomentum, const std::vector<PrimitiveGaussian>& primitives);
 
     /**
      * @return A string containing the center and the primitive gaussians of the orbital.

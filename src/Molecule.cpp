@@ -1,27 +1,38 @@
 #include "Molecule.hpp"
 
 #include "Basis.hpp"
+#include "Eigen/Core"
+#include "Symmetry/CharacterTable.hpp"
 #include "Symmetry/Symmetry.hpp"
 #include "Utils.hpp"
 
+#include <cmath>
 #include <cstddef>
 #include <cstdlib>
 #include <iomanip>
+#include <ios>
 #include <iostream>
 #include <sstream>
 
 Molecule::Molecule(
-    int charge, int multiplicity, const std::string& basisName, const std::vector<Atom>& geometry, double symmetryTolerance
+    int charge, int multiplicity, const std::string& basisName, const std::vector<Atom>& geometry, bool detectSymmetry, double symmetryTolerance
 ) :
-    charge(charge), multiplicity(multiplicity)
+    charge(charge), multiplicity(multiplicity), symmetryTolerance(symmetryTolerance)
 {
 
-    auto newGeometry                       = Symmetry::translateCOMToOrigin(geometry);
-    auto [principalMoments, principalAxes] = Symmetry::diagonalizeInertiaTensor(newGeometry);
-    PointGroup pointGroup = Symmetry::classifyPointGroup(newGeometry, principalMoments, symmetryTolerance);
-    Symmetry::alignCanonically(newGeometry, pointGroup, principalMoments, principalAxes, symmetryTolerance);
-    this->geometry   = newGeometry;
-    this->pointGroup = pointGroup;
+    auto newGeometry = Symmetry::translateCOMToOrigin(geometry);
+    if (detectSymmetry)
+    {
+        auto [principalMoments, principalAxes] = Symmetry::diagonalizeInertiaTensor(newGeometry);
+        PointGroup pointGroup = Symmetry::classifyPointGroup(newGeometry, principalMoments, symmetryTolerance);
+        Symmetry::alignCanonically(newGeometry, pointGroup, principalMoments, principalAxes, symmetryTolerance);
+        this->pointGroup = pointGroup;
+    }
+    else
+    {
+        this->pointGroup = PointGroup(PointGroup::C1, 1, {SymmetryOperation::Identity()});
+    }
+    this->geometry = newGeometry;
 
     buildBasis(basisName);
     this->electronCount      = countElectrons();
@@ -35,14 +46,153 @@ std::string Molecule::toString() const
     ss << "Number of electrons: " << electronCount << "\n";
     ss << "Number of basis functions: " << basisFunctionCount << "\n";
     ss << "Geometry (atom, x, y, z):\n";
-    ss << std::fixed << std::setprecision(8);
+
+    auto format = [](double num) -> std::string
+    {
+        std::stringstream ss;
+
+        if (std::signbit(num))
+            ss << "-";
+        else
+            ss << " ";
+
+        ss << std::left << std::fixed << std::setprecision(8) << std::abs(num);
+
+        return ss.str();
+    };
+
     for (const auto& atom : geometry)
     {
-        ss << "\t" << Utils::atomicNumberToName.at(atom.atomicNumber) << "\t" << atom.coords.x() << "\t"
-           << atom.coords.y() << "\t" << atom.coords.z() << "\n";
+        ss << "\t" << Utils::atomicNumberToName.at(atom.atomicNumber) << "\t" << format(atom.coords.x()) << "\t"
+           << format(atom.coords.y()) << "\t" << format(atom.coords.z()) << "\n";
     }
     ss << "Point Group: " << pointGroup.toString() << "\n";
     return ss.str();
+}
+
+
+std::vector<std::string> Molecule::getAOLabels() const
+{
+    std::vector<std::string> aoLabels;
+    aoLabels.reserve(atomicOrbitals.size());
+    for (size_t i = 0; i < atomicOrbitals.size(); ++i)
+    {
+        const AtomicOrbital& ao = atomicOrbitals[i];
+        std::stringstream label;
+        auto atom = std::find_if(
+            geometry.begin(),
+            geometry.end(),
+            [&ao](const Atom& a) { return std::abs((a.coords - ao.center).squaredNorm()) < 1e-12; }
+        );
+        // get the nubmer of atoms of same atomic number before this atom
+        size_t atomCount = std::count_if(
+            geometry.begin(), atom, [&atom](const Atom& a) { return a.atomicNumber == atom->atomicNumber; }
+        );
+
+        label << std::left << std::setw(3) << i + 1 << " " << std::setw(2)
+              << Utils::atomicNumberToName.at(atom->atomicNumber) << " " << std::setw(2) << atomCount + 1;
+
+        label << " ";
+        switch (ao.angularMomentum.sum())
+        {
+            case 0: label << "s"; break; // s-orbital
+            case 1:
+            {
+                label << "p" << std::setw(4);
+                if (ao.angularMomentum.x() == 1)
+                    label << "x";
+                else if (ao.angularMomentum.y() == 1)
+                    label << "y";
+                else if (ao.angularMomentum.z() == 1)
+                    label << "z";
+                break;
+            }
+            case 2:
+            {
+                label << "d" << std::setw(4);
+
+                if (ao.angularMomentum.x() == 2)
+                    label << "x2";
+                else if (ao.angularMomentum.y() == 2)
+                    label << "y2";
+                else if (ao.angularMomentum.z() == 2)
+                    label << "z2";
+                else if (ao.angularMomentum.x() == 1 && ao.angularMomentum.y() == 1)
+                    label << "xy";
+                else if (ao.angularMomentum.x() == 1 && ao.angularMomentum.z() == 1)
+                    label << "xz";
+                else if (ao.angularMomentum.y() == 1 && ao.angularMomentum.z() == 1)
+                    label << "yz";
+                break;
+            }
+            case 3:
+            {
+                label << "f" << std::setw(4);
+
+                if (ao.angularMomentum.x() == 3)
+                    label << "x3";
+                else if (ao.angularMomentum.y() == 3)
+                    label << "y3";
+                else if (ao.angularMomentum.z() == 3)
+                    label << "z3";
+                else if (ao.angularMomentum.x() == 2 && ao.angularMomentum.y() == 1)
+                    label << "x2y";
+                else if (ao.angularMomentum.x() == 2 && ao.angularMomentum.z() == 1)
+                    label << "x2z";
+                else if (ao.angularMomentum.y() == 2 && ao.angularMomentum.x() == 1)
+                    label << "y2x";
+                else if (ao.angularMomentum.y() == 2 && ao.angularMomentum.z() == 1)
+                    label << "y2z";
+                else if (ao.angularMomentum.z() == 2 && ao.angularMomentum.x() == 1)
+                    label << "z2x";
+                else if (ao.angularMomentum.z() == 2 && ao.angularMomentum.y() == 1)
+                    label << "z2y";
+                else if (ao.angularMomentum.x() == 1 && ao.angularMomentum.y() == 1 && ao.angularMomentum.z() == 1)
+                    label << "xyz";
+                break;
+            }
+            case 4:
+            {
+                label << "g" << std::setw(4);
+                if (ao.angularMomentum.x() == 4)
+                    label << "x4";
+                else if (ao.angularMomentum.y() == 4)
+                    label << "y4";
+                else if (ao.angularMomentum.z() == 4)
+                    label << "z4";
+                else if (ao.angularMomentum.x() == 3 && ao.angularMomentum.y() == 1)
+                    label << "x3y";
+                else if (ao.angularMomentum.x() == 3 && ao.angularMomentum.z() == 1)
+                    label << "x3z";
+                else if (ao.angularMomentum.y() == 3 && ao.angularMomentum.x() == 1)
+                    label << "y3x";
+                else if (ao.angularMomentum.y() == 3 && ao.angularMomentum.z() == 1)
+                    label << "y3z";
+                else if (ao.angularMomentum.z() == 3 && ao.angularMomentum.x() == 1)
+                    label << "z3x";
+                else if (ao.angularMomentum.z() == 3 && ao.angularMomentum.y() == 1)
+                    label << "z3y";
+                else if (ao.angularMomentum.x() == 2 && ao.angularMomentum.y() == 2)
+                    label << "x2y2";
+                else if (ao.angularMomentum.x() == 2 && ao.angularMomentum.z() == 2)
+                    label << "x2z2";
+                else if (ao.angularMomentum.y() == 2 && ao.angularMomentum.z() == 2)
+                    label << "y2z2";
+                else if (ao.angularMomentum.x() == 1 && ao.angularMomentum.y() == 1 && ao.angularMomentum.z() == 2)
+                    label << "xyz2";
+                else if (ao.angularMomentum.x() == 1 && ao.angularMomentum.z() == 1 && ao.angularMomentum.y() == 2)
+                    label << "xy2z";
+                else if (ao.angularMomentum.y() == 1 && ao.angularMomentum.z() == 1 && ao.angularMomentum.x() == 2)
+                    label << "x2yz";
+                break;
+            }
+            default: break;
+        }
+
+        aoLabels.emplace_back(label.str());
+    }
+
+    return aoLabels;
 }
 
 size_t Molecule::countElectrons() const
@@ -85,7 +235,7 @@ void Molecule::buildBasis(const std::string& basisName)
                             shell.exponents[p], shell.coefficients[p], atom.coords, Eigen::Vector3i(i, j, k)
                         );
                     }
-                    atomicOrbitals.emplace_back(atom.coords, primitives);
+                    atomicOrbitals.emplace_back(atom.coords, Eigen::Vector3i(i, j, k), primitives);
                 }
             }
         }

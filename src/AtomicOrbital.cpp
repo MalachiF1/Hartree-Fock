@@ -5,23 +5,11 @@
 #include <cmath>
 #include <iostream>
 
-AtomicOrbital::AtomicOrbital(const Vec3& center, const std::vector<PrimitiveGaussian>& primitives) :
-    center(center), angularMomentum(primitives[0].angularMomentum), primitives(primitives)
+AtomicOrbital::AtomicOrbital(
+    const Vec3& center, const Eigen::Vector3i& angularMomentum, const std::vector<PrimitiveGaussian>& primitives
+) :
+    center(center), angularMomentum(angularMomentum), primitives(primitives)
 {
-    for (const auto& p : primitives)
-    {
-        if (angularMomentum != p.angularMomentum)
-        {
-            int l = angularMomentum.x();
-            int m = angularMomentum.y();
-            int n = angularMomentum.z();
-
-            // If any primitive has different angular momentum, throw an error
-            std::cerr << "Angular momentum mismatch: (" << l << ", " << m << ", " << n << ") vs ("
-                      << p.angularMomentum.x() << ", " << p.angularMomentum.y() << ", " << p.angularMomentum.z() << ")\n";
-            throw std::invalid_argument("All primitive gaussians must have the same angular momentum.");
-        }
-    }
 }
 
 std::string AtomicOrbital::toString() const
@@ -30,15 +18,6 @@ std::string AtomicOrbital::toString() const
     ss << "AtomicOrbital with " << primitives.size() << " primitive Gaussians at center (" << center.x() << ", "
        << center.y() << ", " << center.z() << "):\n{\n";
 
-    for (const auto& p : primitives)
-    {
-        // Indent the primitive gaussian string for readability
-        std::string prim_str = p.toString();
-        std::stringstream prim_ss(prim_str);
-        std::string line;
-        while (std::getline(prim_ss, line)) { ss << "  " << line << "\n"; }
-    }
-    ss << "}";
     return ss.str();
 }
 

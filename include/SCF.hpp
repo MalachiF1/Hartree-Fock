@@ -1,6 +1,7 @@
 #pragma once
 #include "DIIS.hpp"
 #include "Molecule.hpp"
+#include "Symmetry/Symmetry.hpp"
 
 #include <Eigen/Dense>
 
@@ -58,10 +59,11 @@ class SCF
     ElectronRepulsionTensor Vee; // Two-electron repulsion integrals
 
     // SCF state variables that change during iterations.
-    double electronicEnergy; // Electronic energy
-    Eigen::MatrixXd D;       // Density matrix
-    Eigen::MatrixXd F;       // Fock matrix
-    Eigen::MatrixXd C;       // MO coefficient matrix
+    double electronicEnergy;     // Electronic energy
+    Eigen::MatrixXd D;           // Density matrix
+    Eigen::MatrixXd F;           // Fock matrix
+    Eigen::MatrixXd C;           // MO coefficient matrix
+    Eigen::VectorXd eigenvalues; // Eigenvalues of the Fock matrix
 
     // Pointer to the DIIS object (if used).
     std::unique_ptr<DIIS> diis_handler;
@@ -93,7 +95,6 @@ class SCF
      * Diagonalizes the Fock matrix to obtain the molecular orbitals and updates the density matrix and coefficient matrix.
      */
     void diagonalizeAndUpdate();
-    void diagonalizeAndUpdate(const Eigen::MatrixXd& F_prime); // overload for DIIS
 
     /**
      * Prints the status of a single SCF iteration.
@@ -120,4 +121,32 @@ class SCF
      * @param converged True if the SCF calculation converged, false otherwise.
      */
     void printFinalResults(bool converged) const;
+
+    /**
+     * Formats and returns a short string representation of the molecular orbital eigenvalues.
+     *
+     * @param eigenvalues The vector of molecular orbital eigenvalues.
+     * @param precision The number of decimal places to display for the eigenvalues.
+     * @param MOsPerRow The number of molecular orbitals to display per row.
+     * @return A formatted string representing the molecular orbital eigenvalues.
+     */
+    std::string printShortMOs(const Eigen::VectorXd& eigenvalues, size_t precision, size_t MOsPerRow) const;
+
+    /**
+     * Formats and returns a string representation of the molecular orbitals and their eigenvalues.
+     *
+     * @param MOs The matrix of molecular orbital coefficients.
+     * @param eigenvalues The vector of molecular orbital eigenvalues.
+     * @param aoLabels The labels for the atomic orbitals.
+     * @param precision The number of decimal places to display for the coefficients and eigenvalues.
+     * @param MOsPerRow The number of molecular orbitals to display per row.
+     * @return A formatted string representing the molecular orbitals and their eigenvalues.
+     */
+    std::string printFullMOs(
+        const Eigen::MatrixXd& MOs,
+        const Eigen::VectorXd& eigenvalues,
+        const std::vector<std::string>& aoLabels,
+        size_t precision,
+        size_t MOsPerRow
+    ) const;
 };

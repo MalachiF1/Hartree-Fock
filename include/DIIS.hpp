@@ -10,19 +10,17 @@ class DIIS
      * Updates the DIIS storage with the latest error and Fock matrix (in orthogonal basis).
      *
      * @param F The current Fock matrix.
-     * @param D The current density matrix.
-     * @param S The overlap matrix.
-     * @param X The orthogonalization matrix (S^(-1/2)).
+     * @param errorVector The current error vector (commutator of F and D).
      */
-    void update(const Eigen::MatrixXd& F, const Eigen::MatrixXd& D, const Eigen::MatrixXd& S, const Eigen::MatrixXd& X);
+    void update(const Eigen::MatrixXd& F, const Eigen::MatrixXd& errorVector);
 
     /*
      * Extrapolates the Fock matrix using the stored error vectors and Fock matrices.
      *
-     * @param orthoF The current Fock matrix in the orthogonalized basis.
+     * @param F The current Fock matrix
      * @return The extrapolated Fock matrix.
      */
-    Eigen::MatrixXd extrapolate(const Eigen::MatrixXd& orthoF);
+    Eigen::MatrixXd extrapolate(const Eigen::MatrixXd& F);
 
     /*
      * Returns the current error norm, which is the norm of the last error vector.
@@ -32,9 +30,9 @@ class DIIS
     double getErrorNorm() const;
 
   private:
-    size_t maxSize;                                 // Maximum number of error vectors to store
-    std::vector<Eigen::MatrixXd> errorVectors;      // History of error vectors
-    std::vector<Eigen::MatrixXd> fockMatricesOrtho; // History of Fock matrices in orthogonalized basis
+    size_t maxSize;                            // Maximum number of error vectors to store
+    std::vector<Eigen::MatrixXd> errorVectors; // History of error vectors
+    std::vector<Eigen::MatrixXd> fockMatrices; // History of Fock matrices
 
     /*
      * Computes the coefficients for the DIIS extrapolation.
