@@ -8,9 +8,11 @@
 #include <sstream>
 #include <string>
 
-std::pair<Molecule, SCFOptions> Input::read(const std::string& filename)
+Input::Input(const std::string& filename) : filename(filename) {}
+
+std::pair<Molecule, SCFOptions> Input::read()
 {
-    std::ifstream inputFile(filename);
+    std::ifstream inputFile(this->filename);
     if (!inputFile.is_open())
     {
         throw std::runtime_error("Could not open input file: " + filename);
@@ -95,9 +97,6 @@ std::pair<Molecule, SCFOptions> Input::read(const std::string& filename)
 
     Molecule molecule  = readMoleculeBlock(moleculeBlock.str(), basisBlock.str());
     SCFOptions options = readSCFBlock(SCFBlock.str());
-    std::cout << "energyTol: " << options.energyTol << ", densityTol: " << options.densityTol << "\n";
-    std::cout << "useDIIS: " << options.useDIIS << ", DIISmaxSize: " << options.DIISmaxSize << "\n";
-    std::cout << "DIISstart: " << options.DIISstart << ", DIISErrorTol: " << options.DIISErrorTol << "\n";
 
     return {molecule, options};
 }
@@ -115,8 +114,6 @@ Molecule Input::readMoleculeBlock(const std::string& moleculeBlock, const std::s
     molStream >> multiplicity;
     if (molStream.fail())
         throw std::runtime_error("Invalid multiplicity in $molecule block.");
-
-    std::cout << "Charge: " << charge << ", Multiplicity: " << multiplicity << "\n";
 
     std::string atomStr, xStr, yStr, zStr;
     while (molStream >> atomStr)

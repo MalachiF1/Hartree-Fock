@@ -1,6 +1,7 @@
 #pragma once
 #include "DIIS.hpp"
 #include "Molecule.hpp"
+#include "Output.hpp"
 
 #include <Eigen/Dense>
 
@@ -19,7 +20,7 @@ struct SCFOptions
     double densityThreshold  = 1.0e-10;
     bool useSymmetry         = true;
     double symmetryTolerance = 1.0e-5;
-    bool printFullMOs      = false;
+    bool printFullMOs        = false;
 };
 
 /**
@@ -31,7 +32,7 @@ struct SCFOptions
 class SCF
 {
   public:
-    SCF(const Molecule& molecule, const SCFOptions& options);
+    SCF(const Molecule& molecule, const SCFOptions& options, std::shared_ptr<Output> output);
 
     /**
      * Runs the Self-Consistent Field (SCF) calculation.
@@ -49,10 +50,10 @@ class SCF
     void run();
 
   private:
-    // A constant reference to the molecule object.
-    // const Molecule& molecule;
-    const std::unique_ptr<Molecule> molecule;
-    const SCFOptions options;
+    const std::shared_ptr<Output> output; // output handler
+
+    const std::unique_ptr<Molecule> molecule; // Pointer to the molecule object.
+    const SCFOptions options;                 // SCF options and parameters.
 
     // SCF state variables that are constant throughout the calculation.
     size_t basisCount;           // number of basis functions

@@ -9,8 +9,8 @@
 #include <ios>
 #include <iostream>
 
-SCF::SCF(const Molecule& molecule, const SCFOptions& options) :
-    molecule(std::make_unique<Molecule>(molecule)), options(options)
+SCF::SCF(const Molecule& molecule, const SCFOptions& options, std::shared_ptr<Output> output) :
+    output(output), molecule(std::make_unique<Molecule>(molecule)), options(options)
 {
 }
 
@@ -25,7 +25,7 @@ void SCF::run()
     if (options.useDIIS) // Initialize the DIIS handler with the specified maximum size.
         diis_handler = std::make_unique<DIIS>(options.DIISmaxSize);
 
-    std::cout << "\n--- Starting SCF Iterations ---\n" << std::endl;
+    this->output->write("\n--- Starting SCF Iterations ---\n");
 
     // SCF cycles
     for (size_t iteration = 0; iteration < options.maxIter; ++iteration)
@@ -81,8 +81,7 @@ void SCF::run()
 
 void SCF::initialize(double schwartzThreshold, bool direct)
 {
-    std::cout << "Starting SCF calculation..." << std::endl;
-    std::cout << molecule->toString() << std::endl;
+    this->output->write("Starting SCF calculation for:\n" + molecule->toString() + "\n");
 
     // Set constant parameters.
     this->basisCount    = molecule->getBasisFunctionCount();
@@ -284,15 +283,22 @@ void SCF::diagonalizeAndUpdate()
 
 void SCF::printIteration(int iter, double dE, double dD) const
 {
-    std::cout << "Iteration " << std::setw(3) << iter << ": "
-              << " | ΔE = " << std::scientific << dE << " | ΔD = " << dD << std::endl;
+    this->output->write(
+        "Iteration " + std::to_string(iter) + ": | ΔE = " + std::to_string(dE) + " | ΔD = " + std::to_string(dD) + "\n"
+    );
+    std::stringstream ss;
+    ss << "Iteration " << std::setw(3) << iter << ": "
+       << " | ΔE = " << std::scientific << dE << " | ΔD = " << dD << std::endl;
+    this->output->write(ss.str());
 }
 
 
 void SCF::printIteration(int iter, double dE, double dD, double DIISError) const
 {
-    std::cout << "Iteration " << std::setw(3) << iter << ": "
-              << " | ΔE = " << std::scientific << dE << " | ΔD = " << dD << " | DIIS error = " << DIISError << std::endl;
+    std::stringstream ss;
+    ss << "Iteration " << std::setw(3) << iter << ": "
+       << " | ΔE = " << std::scientific << dE << " | ΔD = " << dD << " | DIIS error = " << DIISError << std::endl;
+    this->output->write(ss.str());
 }
 
 
@@ -324,9 +330,9 @@ void SCF::printFinalResults(bool converged) const
 
 
     ss << "-- Occupied --\n";
-    ss << printShortMOs(this->eigenvalues.head(this->occupiedCount), 5, 8);
+    ss << printShortMOs(this->eigenvalues.head(this->occupiedCount), 5, 7);
     ss << "-- Virtual --\n";
-    ss << printShortMOs(this->eigenvalues.tail(this->basisCount - this->occupiedCount), 5, 8);
+    ss << printShortMOs(this->eigenvalues.tail(this->basisCount - this->occupiedCount), 5, 7);
     for (size_t i = 0; i < 99; ++i) { ss << "-"; }
     ss << "\n";
 
@@ -357,7 +363,7 @@ void SCF::printFinalResults(bool converged) const
         for (size_t i = 0; i < 99; ++i) { ss << "-"; }
     }
 
-    std::cout << ss.str() << std::endl;
+    this->output->write(ss.str());
 }
 
 std::string SCF::printShortMOs(const Eigen::VectorXd& eigenvalues, size_t precision, size_t MOsPerRow) const

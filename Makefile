@@ -49,6 +49,7 @@ $(BINDIR):
 # Run the program after ensuring it's built
 run: all
 	./$(TARGET)
+	./$(TARGET) $(filter-out run,$(MAKECMDGOALS))
 
 profile: all
 	./$(TARGET)
