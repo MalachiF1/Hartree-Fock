@@ -1,0 +1,281 @@
+#include "Input.hpp"
+
+#include "Utils.hpp"
+
+#include <algorithm>
+#include <fstream>
+#include <iostream>
+#include <sstream>
+#include <string>
+
+std::pair<Molecule, SCFOptions> Input::read(const std::string& filename)
+{
+    std::ifstream inputFile(filename);
+    if (!inputFile.is_open())
+    {
+        throw std::runtime_error("Could not open input file: " + filename);
+    }
+
+    // Flags
+    bool inMoleculeBlock = false;
+    bool inBasisBlock    = false;
+    bool inSCFBlock      = false;
+
+    // Input blocks
+    std::stringstream moleculeBlock;
+    std::stringstream basisBlock;
+    std::stringstream SCFBlock;
+
+    // Remove empty lines and comments, seperate into the blocks.
+    std::string line;
+    size_t lineNumber = 0;
+
+    auto toLowerString = [](const std::string& str)
+    {
+        std::string lowerStr = str;
+        std::transform(
+            lowerStr.begin(), lowerStr.end(), lowerStr.begin(), [](unsigned char c) { return std::tolower(c); }
+        );
+        return lowerStr;
+    };
+
+    while (std::getline(inputFile, line))
+    {
+        std::istringstream iss(line);
+        std::string token;
+
+        ++lineNumber;
+
+        while (iss >> token)
+        {
+            if (token[0] == '#') // Comment
+                break;
+
+            if (toLowerString(token) == "$molecule")
+            {
+                inMoleculeBlock = true;
+                continue;
+            }
+            else if (toLowerString(token) == "$basis")
+            {
+                inBasisBlock = true;
+                continue;
+            }
+            else if (toLowerString(token) == "$scf")
+            {
+                inSCFBlock = true;
+                continue;
+            }
+            else if (toLowerString(token) == "$end")
+            {
+                inMoleculeBlock = false;
+                inBasisBlock    = false;
+                inSCFBlock      = false;
+                continue;
+            }
+            else if (inSCFBlock)
+            {
+                SCFBlock << token << " ";
+            }
+            else if (inMoleculeBlock)
+            {
+                moleculeBlock << token << " ";
+            }
+            else if (inBasisBlock)
+            {
+                basisBlock << token << " ";
+            }
+            else
+            {
+                throw std::runtime_error("Unexpected token at line " + std::to_string(lineNumber) + ": " + token);
+            }
+        }
+    }
+    inputFile.close();
+
+    Molecule molecule  = readMoleculeBlock(moleculeBlock.str(), basisBlock.str());
+    SCFOptions options = readSCFBlock(SCFBlock.str());
+    std::cout << "energyTol: " << options.energyTol << ", densityTol: " << options.densityTol << "\n";
+    std::cout << "useDIIS: " << options.useDIIS << ", DIISmaxSize: " << options.DIISmaxSize << "\n";
+    std::cout << "DIISstart: " << options.DIISstart << ", DIISErrorTol: " << options.DIISErrorTol << "\n";
+
+    return {molecule, options};
+}
+
+Molecule Input::readMoleculeBlock(const std::string& moleculeBlock, const std::string& basisBlock)
+{
+    std::istringstream molStream(moleculeBlock);
+    int charge;
+    unsigned multiplicity;
+    std::vector<Atom> geometry;
+    molStream >> charge;
+    if (molStream.fail())
+        throw std::runtime_error("Invalid charge in $molecule block.");
+
+    molStream >> multiplicity;
+    if (molStream.fail())
+        throw std::runtime_error("Invalid multiplicity in $molecule block.");
+
+    std::cout << "Charge: " << charge << ", Multiplicity: " << multiplicity << "\n";
+
+    std::string atomStr, xStr, yStr, zStr;
+    while (molStream >> atomStr)
+    {
+        if (!(molStream >> xStr >> yStr >> zStr))
+        {
+            throw std::runtime_error("Incomplete atom specification in $molecule block for atom '" + atomStr + "'.");
+        }
+
+        std::istringstream coordStream(xStr + " " + yStr + " " + zStr);
+        double x, y, z;
+        coordStream >> x >> y >> z;
+
+        if (coordStream.fail())
+        {
+            throw std::runtime_error(
+                "Invalid coordinates in $molecule block for atom " + atomStr + ": '" + xStr + " " + yStr + " " + zStr
+                + "'"
+            );
+        }
+
+        if (std::all_of(atomStr.begin(), atomStr.end(), ::isdigit))
+        {
+            unsigned atomicNumber = std::stoi(atomStr);
+            geometry.emplace_back(atomicNumber, Vec3(x, y, z));
+        }
+        else
+        {
+            auto it = Utils::nameToAtomicNumber.find(atomStr);
+            if (it == Utils::nameToAtomicNumber.end())
+                throw std::runtime_error("Invalid atom symbol \"" + atomStr + "\" in $molecule block.");
+            geometry.emplace_back(it->second, Vec3(x, y, z));
+        }
+    }
+    if (geometry.empty())
+        throw std::runtime_error("No atoms specified in $molecule block.");
+
+    std::istringstream basisStream(basisBlock);
+    std::string basisSetName;
+    basisStream >> basisSetName;
+    if (basisStream.fail())
+        throw std::runtime_error("Error in basis set specification in $basis block.");
+
+    return Molecule(charge, multiplicity, basisSetName, geometry);
+}
+
+
+SCFOptions Input::readSCFBlock(const std::string& SCFBlock)
+{
+
+    auto toLowerString = [](const std::string& str)
+    {
+        std::string lowerStr = str;
+        std::transform(
+            lowerStr.begin(), lowerStr.end(), lowerStr.begin(), [](unsigned char c) { return std::tolower(c); }
+        );
+        return lowerStr;
+    };
+
+    std::istringstream SCFStream(SCFBlock);
+    SCFOptions options;
+    std::string token;
+    while (SCFStream >> token)
+    {
+        std::string tokenLwr = toLowerString(token);
+        if (tokenLwr == "max_iter")
+        {
+            SCFStream >> options.maxIter;
+        }
+        else if (tokenLwr == "energy_tol")
+        {
+            SCFStream >> options.energyTol;
+        }
+        else if (tokenLwr == "density_tol")
+        {
+            SCFStream >> options.densityTol;
+        }
+        else if (tokenLwr == "diis")
+        {
+            std::string boolStr;
+            SCFStream >> boolStr;
+            if (toLowerString(boolStr) == "true" || boolStr == "1")
+                options.useDIIS = true;
+            else if (toLowerString(boolStr) == "false" || boolStr == "0")
+                options.useDIIS = false;
+            else
+                throw std::runtime_error("Invalid boolean value for " + token + " in $scf block: " + boolStr);
+        }
+        else if (tokenLwr == "diis_size")
+        {
+            SCFStream >> options.DIISmaxSize;
+        }
+        else if (tokenLwr == "diis_start")
+        {
+            SCFStream >> options.DIISstart;
+        }
+        else if (tokenLwr == "diis_tol")
+        {
+            SCFStream >> options.DIISErrorTol;
+        }
+        else if (tokenLwr == "direct")
+        {
+            std::string boolStr;
+            SCFStream >> boolStr;
+            if (toLowerString(boolStr) == "true" || boolStr == "1")
+                options.direct = true;
+            else if (toLowerString(boolStr) == "false" || boolStr == "0")
+                options.direct = false;
+            else
+                throw std::runtime_error("Invalid boolean value for " + token + " in $scf block: " + boolStr);
+        }
+        else if (tokenLwr == "schwartz_thresh")
+        {
+            SCFStream >> options.schwartzThreshold;
+        }
+        else if (tokenLwr == "density_thresh")
+        {
+            SCFStream >> options.densityThreshold;
+        }
+        else if (tokenLwr == "symmetry")
+        {
+            std::string boolStr;
+            SCFStream >> boolStr;
+            if (toLowerString(boolStr) == "true" || boolStr == "1")
+                options.useSymmetry = true;
+            else if (toLowerString(boolStr) == "false" || boolStr == "0")
+                options.useSymmetry = false;
+            else
+                throw std::runtime_error("Invalid boolean value for " + token + " in $scf block: " + boolStr);
+        }
+        else if (tokenLwr == "symmetry_tol")
+        {
+            SCFStream >> options.symmetryTolerance;
+        }
+        else if (tokenLwr == "print_full_mos")
+        {
+            std::string boolStr;
+            SCFStream >> boolStr;
+            if (toLowerString(boolStr) == "true" || boolStr == "1")
+                options.printFullMOs = true;
+            else if (toLowerString(boolStr) == "false" || boolStr == "0")
+                options.printFullMOs = false;
+            else
+                throw std::runtime_error("Invalid boolean value for " + token + " in $scf block: " + boolStr);
+        }
+        else if (tokenLwr == "symmetry_tolerance")
+        {
+            SCFStream >> options.symmetryTolerance;
+        }
+        else
+        {
+            throw std::runtime_error("Unknown option in $scf block: " + token);
+        }
+
+        if (SCFStream.fail())
+        {
+            throw std::runtime_error("Error reading value for option: " + token);
+        }
+    }
+
+    return options;
+}

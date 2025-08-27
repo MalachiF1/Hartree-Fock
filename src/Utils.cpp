@@ -36,7 +36,29 @@ extern const std::unordered_map<unsigned, std::string> atomicNumberToName = {
     {91, "Pa"}, {92, "U"},
 
 };
-extern const std::unordered_map<std::string, unsigned> Elements = {
+
+size_t CaseInsensitiveHash::operator()(const std::string& str) const
+{
+    std::string lowerStr = str;
+    std::transform(lowerStr.begin(), lowerStr.end(), lowerStr.begin(), [](unsigned char c) { return std::tolower(c); });
+    return std::hash<std::string>()(lowerStr);
+}
+
+bool CaseInsensitiveEqual::operator()(const std::string& a, const std::string& b) const
+{
+    if (a.length() != b.length())
+    {
+        return false;
+    }
+    return std::equal(
+        a.begin(),
+        a.end(),
+        b.begin(),
+        [](unsigned char c1, unsigned char c2) { return std::tolower(c1) == std::tolower(c2); }
+    );
+}
+
+extern const std::unordered_map<std::string, unsigned, CaseInsensitiveHash, CaseInsensitiveEqual> nameToAtomicNumber = {
     {"H", 1},   {"He", 2},  {"Li", 3},  {"Be", 4},  {"B", 5},   {"C", 6},   {"N", 7},   {"O", 8},   {"F", 9},
     {"Ne", 10}, {"Na", 11}, {"Mg", 12}, {"Al", 13}, {"Si", 14}, {"P", 15},  {"S", 16},  {"Cl", 17}, {"Ar", 18},
     {"K", 19},  {"Ca", 20}, {"Sc", 21}, {"Ti", 22}, {"V", 23},  {"Cr", 24}, {"Mn", 25}, {"Fe", 26}, {"Co", 27},

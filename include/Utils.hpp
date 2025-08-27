@@ -21,9 +21,19 @@ struct Atom
 
 namespace Utils
 {
+struct CaseInsensitiveHash
+{
+    size_t operator()(const std::string& str) const;
+};
+
+struct CaseInsensitiveEqual
+{
+    bool operator()(const std::string& a, const std::string& b) const;
+};
+
 extern const std::unordered_map<int, double> atomicMasses;
 extern const std::unordered_map<unsigned, std::string> atomicNumberToName;
-extern const std::unordered_map<std::string, unsigned> nameToAtomicNumber;
+extern const std::unordered_map<std::string, unsigned, CaseInsensitiveHash, CaseInsensitiveEqual> nameToAtomicNumber;
 } // namespace Utils
 
 /**

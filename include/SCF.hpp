@@ -1,9 +1,26 @@
 #pragma once
 #include "DIIS.hpp"
 #include "Molecule.hpp"
-#include "Symmetry/Symmetry.hpp"
 
 #include <Eigen/Dense>
+
+
+struct SCFOptions
+{
+    size_t maxIter           = 30;
+    double energyTol         = 1.0e-6;
+    double densityTol        = 1.0e-6;
+    bool useDIIS             = true;
+    size_t DIISmaxSize       = 6;
+    unsigned DIISstart       = 1;
+    double DIISErrorTol      = 1.0e-6;
+    bool direct              = false;
+    double schwartzThreshold = 1.0e-10;
+    double densityThreshold  = 1.0e-10;
+    bool useSymmetry         = true;
+    double symmetryTolerance = 1.0e-5;
+    bool printFullMOs      = false;
+};
 
 /**
  * @brief Class for performing Self-Consistent Field (SCF) calculations on a molecule.
@@ -14,7 +31,7 @@
 class SCF
 {
   public:
-    SCF(const Molecule& molecule);
+    SCF(const Molecule& molecule, const SCFOptions& options);
 
     /**
      * Runs the Self-Consistent Field (SCF) calculation.
@@ -29,22 +46,13 @@ class SCF
      *        but,the extrapolation only starts at the DIISstart itteration.
      * @param DIISErrorTol Tolerance for the DIIS error norm to determine convergence.
      */
-    void run(
-        size_t maxIter           = 50,
-        double energyTol         = 1e-8,
-        double densityTol        = 1e-8,
-        double schwartzThreshold = 1e-10,
-        bool useDIIS             = true,
-        size_t DIISmaxSize       = 8,
-        unsigned DIISstart       = 1,
-        double DIISErrorTol      = 1e-8,
-        bool direct              = false,
-        double densityThreshold  = 1e-10
-    );
+    void run();
 
   private:
     // A constant reference to the molecule object.
-    const Molecule& molecule;
+    // const Molecule& molecule;
+    const std::unique_ptr<Molecule> molecule;
+    const SCFOptions options;
 
     // SCF state variables that are constant throughout the calculation.
     size_t basisCount;           // number of basis functions

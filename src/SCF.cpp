@@ -9,47 +9,39 @@
 #include <ios>
 #include <iostream>
 
-SCF::SCF(const Molecule& molecule) : molecule(molecule) {}
+SCF::SCF(const Molecule& molecule, const SCFOptions& options) :
+    molecule(std::make_unique<Molecule>(molecule)), options(options)
+{
+}
 
-void SCF::run(
-    size_t maxIter,
-    double energyTol,
-    double densityTol,
-    double schwartzThreshold,
-    bool useDIIS,
-    size_t DIISmaxSize,
-    unsigned DIISstart,
-    double DIISErrorTol,
-    bool direct,
-    double densityThreshold
-)
+void SCF::run()
 {
     // Initialize the SCF calculation. (This should be called only once.)
-    this->initialize(schwartzThreshold, direct);
+    this->initialize(options.schwartzThreshold, options.direct);
 
     // Get the initial guess density.
     this->computeInitialGuessDensity();
 
-    if (useDIIS) // Initialize the DIIS handler with the specified maximum size.
-        diis_handler = std::make_unique<DIIS>(DIISmaxSize);
+    if (options.useDIIS) // Initialize the DIIS handler with the specified maximum size.
+        diis_handler = std::make_unique<DIIS>(options.DIISmaxSize);
 
     std::cout << "\n--- Starting SCF Iterations ---\n" << std::endl;
 
     // SCF cycles
-    for (size_t iteration = 0; iteration < maxIter; ++iteration)
+    for (size_t iteration = 0; iteration < options.maxIter; ++iteration)
     {
         // Store the energy and density from the previous iteration to check for convergence.
         double lastElectronicEnergy = this->electronicEnergy;
         Eigen::MatrixXd D_last      = this->D;
 
         // Build the new Fock matrix from the current density.
-        if (direct)
-            this->buildFockMatrix(schwartzThreshold, densityThreshold);
+        if (options.direct)
+            this->buildFockMatrix(options.schwartzThreshold, options.densityThreshold);
         else
             this->buildFockMatrix();
 
         // Store the error vector and fock matrix for DIIS if applicable.
-        if (useDIIS)
+        if (options.useDIIS)
         {
             // Calculate the commutator of the fock and density matrices as the error vector.
             Eigen::MatrixXd errorVector = this->F * this->D * this->S - this->S * this->D * this->F;
@@ -58,7 +50,7 @@ void SCF::run(
 
         // Diagonalize the Fock matrix and compute the new density and coefficients.
 
-        if (useDIIS && iteration >= DIISstart) // Extrapolate the orthogonal Fock matrix using DIIS.
+        if (options.useDIIS && iteration >= options.DIISstart) // Extrapolate the orthogonal Fock matrix using DIIS.
             this->F = diis_handler->extrapolate(this->F);
 
         this->diagonalizeAndUpdate();
@@ -68,13 +60,14 @@ void SCF::run(
         double dD = (this->D - D_last).norm();
 
         // Print the current iteration results.
-        if (useDIIS)
+        if (options.useDIIS)
             this->printIteration(iteration + 1, dE, dD, diis_handler->getErrorNorm());
         else
             this->printIteration(iteration + 1, dE, dD);
 
         // Check for convergence.
-        if (dE < energyTol && dD < densityTol && (!useDIIS || diis_handler->getErrorNorm() < DIISErrorTol))
+        if (dE < options.energyTol && dD < options.densityTol
+            && (!options.useDIIS || diis_handler->getErrorNorm() < options.DIISErrorTol))
         {
             // basis If converged, print the final results and exit.
             this->printFinalResults(true);
@@ -89,28 +82,28 @@ void SCF::run(
 void SCF::initialize(double schwartzThreshold, bool direct)
 {
     std::cout << "Starting SCF calculation..." << std::endl;
-    std::cout << molecule.toString() << std::endl;
+    std::cout << molecule->toString() << std::endl;
 
     // Set constant parameters.
-    this->basisCount    = molecule.getBasisFunctionCount();
-    this->occupiedCount = molecule.getElectronCount() / 2; // Assuming closed-shell system (RHF)
+    this->basisCount    = molecule->getBasisFunctionCount();
+    this->occupiedCount = molecule->getElectronCount() / 2; // Assuming closed-shell system (RHF)
 
     // Calculate one-electron integrals and nuclear repulsion.
-    this->nuclearEnergy = molecule.nuclearRepulsion();
-    this->T             = molecule.kineticMatrix();
-    this->V             = molecule.nuclearAttractionMatrix();
+    this->nuclearEnergy = molecule->nuclearRepulsion();
+    this->T             = molecule->kineticMatrix();
+    this->V             = molecule->nuclearAttractionMatrix();
     this->h             = this->T + this->V;
 
     // Calculate the overlap and orthogonalization matrices.
-    this->S = molecule.overlapMatrix();
+    this->S = molecule->overlapMatrix();
     this->X = inverseSqrtMatrix(this->S);
 
     // Calculate two-electron integrals (only if not using direct method).
     if (!direct)
-        this->Vee = molecule.electronRepulsionTensor(schwartzThreshold);
+        this->Vee = molecule->electronRepulsionTensor(schwartzThreshold);
     else
         // If using direct method, only pre-calculate the Schwartz screening matrix.
-        this->Q = molecule.schwartzScreeningMatrix();
+        this->Q = molecule->schwartzScreeningMatrix();
 }
 
 
@@ -169,7 +162,7 @@ void SCF::buildFockMatrix(double schwartzThreshold, double densityThreshold)
 {
     const size_t& N_ao = this->basisCount;
     Eigen::MatrixXd G  = Eigen::MatrixXd::Zero(N_ao, N_ao);
-    const auto& AOs    = this->molecule.getAtomicOrbitals();
+    const auto& AOs    = this->molecule->getAtomicOrbitals();
 
 #pragma omp parallel
     {
@@ -319,7 +312,7 @@ void SCF::printFinalResults(bool converged) const
     ss << "Nuclear Repulsion: " << this->nuclearEnergy << " Hartree\n";
     ss << "Total SCF Energy:  " << totalEnergy << " Hartree\n";
 
-    std::vector<std::string> aoLabels = this->molecule.getAOLabels();
+    std::vector<std::string> aoLabels = this->molecule->getAOLabels();
 
     ss << "\n";
     for (size_t i = 0; i < 99; ++i) { ss << "-"; }
@@ -330,36 +323,39 @@ void SCF::printFinalResults(bool converged) const
     ss << "\n";
 
 
-    ss << "\n-- Occupied --\n";
+    ss << "-- Occupied --\n";
     ss << printShortMOs(this->eigenvalues.head(this->occupiedCount), 5, 8);
     ss << "-- Virtual --\n";
     ss << printShortMOs(this->eigenvalues.tail(this->basisCount - this->occupiedCount), 5, 8);
     for (size_t i = 0; i < 99; ++i) { ss << "-"; }
     ss << "\n";
 
-    ss << "\n";
-    for (size_t i = 0; i < 99; ++i) { ss << "-"; }
-    ss << "\n";
-    whitespaceWidth = (99 - std::string("Molecular Orbital Coefficients").length()) / 2;
-    ss << std::string(whitespaceWidth, ' ') << "Molecular Orbital Coefficients" << std::string(whitespaceWidth, ' ')
-       << "\n";
-    for (size_t i = 0; i < 99; ++i) { ss << "-"; }
-    ss << "\n";
+    if (options.printFullMOs)
+    {
+        ss << "\n";
+        for (size_t i = 0; i < 99; ++i) { ss << "-"; }
+        ss << "\n";
+        whitespaceWidth = (99 - std::string("Molecular Orbital Coefficients").length()) / 2;
+        ss << std::string(whitespaceWidth, ' ') << "Molecular Orbital Coefficients" << std::string(whitespaceWidth, ' ')
+           << "\n";
+        for (size_t i = 0; i < 99; ++i) { ss << "-"; }
+        ss << "\n";
 
-    ss << "Occupied orbitals:\n";
-    ss << "‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾\n";
-    ss << printFullMOs(this->C.leftCols(this->occupiedCount), this->eigenvalues.head(this->occupiedCount), aoLabels, 5, 5);
+        ss << "\nOccupied orbitals:\n";
+        ss << "‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾\n";
+        ss << printFullMOs(this->C.leftCols(this->occupiedCount), this->eigenvalues.head(this->occupiedCount), aoLabels, 5, 5);
 
-    ss << "\nVirtual orbitals:\n";
-    ss << "‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾\n";
-    ss << printFullMOs(
-        this->C.rightCols(this->basisCount - this->occupiedCount),
-        this->eigenvalues.tail(this->basisCount - this->occupiedCount),
-        aoLabels,
-        5,
-        5
-    );
-    for (size_t i = 0; i < 99; ++i) { ss << "-"; }
+        ss << "\nVirtual orbitals:\n";
+        ss << "‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾\n";
+        ss << printFullMOs(
+            this->C.rightCols(this->basisCount - this->occupiedCount),
+            this->eigenvalues.tail(this->basisCount - this->occupiedCount),
+            aoLabels,
+            5,
+            5
+        );
+        for (size_t i = 0; i < 99; ++i) { ss << "-"; }
+    }
 
     std::cout << ss.str() << std::endl;
 }
