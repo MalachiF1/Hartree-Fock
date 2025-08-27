@@ -20,19 +20,20 @@ Molecule::Molecule(
     charge(charge), multiplicity(multiplicity), symmetryTolerance(symmetryTolerance)
 {
 
-    auto newGeometry = Symmetry::translateCOMToOrigin(geometry);
     if (detectSymmetry)
     {
+        auto newGeometry                       = Symmetry::translateCOMToOrigin(geometry);
         auto [principalMoments, principalAxes] = Symmetry::diagonalizeInertiaTensor(newGeometry);
         PointGroup pointGroup = Symmetry::classifyPointGroup(newGeometry, principalMoments, symmetryTolerance);
         Symmetry::alignCanonically(newGeometry, pointGroup, principalMoments, principalAxes, symmetryTolerance);
         this->pointGroup = pointGroup;
+        this->geometry   = newGeometry;
     }
     else
     {
+        this->geometry   = geometry;
         this->pointGroup = PointGroup(PointGroup::C1, 1, {SymmetryOperation::Identity()});
     }
-    this->geometry = newGeometry;
 
     buildBasis(basisName);
     this->electronCount      = countElectrons();

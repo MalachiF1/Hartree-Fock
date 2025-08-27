@@ -12,6 +12,7 @@ struct PointGroup
 {
     enum PointGroupName
     {
+        Kh,
         Dinfh,
         Cinfh,
         I,

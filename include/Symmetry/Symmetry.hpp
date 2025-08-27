@@ -197,15 +197,6 @@ void classifyReflectionPlanes(
     double tol
 );
 
-/**
- * Returns the NxN matrix (where N is the number of basis functions) representation of a 3x3 symmetry operation matrix
- * in the AO basis.
- *
- * @param op the SymmetryOperation object to get the AO representation of.
- * @aos The atomic orbital basis
- * @tol The tolerance for numerical comparisons
- */
-Eigen::MatrixXd getAOBasisRep(const SymmetryOperation& op, const std::vector<AtomicOrbital>& aos, double tol);
 
 /**
  * Classifies the point group of a molecular geometry based on its symmetry operations.
@@ -239,5 +230,79 @@ std::vector<std::vector<SymmetryOperation>> getClasses(const std::vector<Symmetr
 std::vector<std::string> nameClasses(
     const std::vector<std::vector<SymmetryOperation>>& classes, const PointGroup& pointGroup, double tol
 );
+
+/**
+ * Computes the matrix representation of a symmetry operation in the atomic orbital basis.
+ *
+ * @param op The symmetry operation object (contains 3x3 cartesian matrix representation).
+ * @param aos The atomic orbital basis.
+ * @param tol The tolerance for numerical comparisons.
+ * @return An Eigen::MatrixXd representing the symmetry operation in the atomic orbital basis.
+ */
+
+Eigen::MatrixXd getAOBasisRep(const SymmetryOperation& op, const std::vector<AtomicOrbital>& aos, double tol);
+
+
+/**
+ * Struct to hold the projection operators, their corresponding irrep names, and the atomic orbital basis
+ * representations of the symmetry operations. This object is returned by the buildProjectionOperators function.
+ */
+struct ProjectionOperators
+{
+    std::vector<std::string> irrepNames;
+    std::vector<Eigen::MatrixXd> operators;
+    std::vector<Eigen::MatrixXd> AOBasisReps;
+};
+
+/**
+ * Builds the projection operators for each irrep of the point group in the atomic orbital basis.
+ *
+ * @param pointGroup The PointGroup object representing the point group of the molecule.
+ * @param aos The atomic orbital basis.
+ * @param tol The tolerance for numerical comparisons.
+ * @return A ProjectionOperators object containing the projection operators, their corresponding irrep names,
+ *         and the atomic orbital basis representations of the symmetry operations.
+ */
+ProjectionOperators buildProjectionOperators(const PointGroup& pointGroup, const std::vector<AtomicOrbital>& aos, double tol);
+
+/**
+ * Struct to hold the Symmetry Adapted Linear Combinations (SALCs) of the atomic orbital basis.
+ * This includes the transformation matrix U, the irreps and their counts, and the atomic orbital basis
+ * representations of the symmetry operations. This object is returned by the buildSALCs function.
+ * This struct also contains methods to transform/inverse transform to/from the SALCs bais, and symmetrize matrices in the AO basis.
+ */
+struct SALCs
+{
+    Eigen::MatrixXd transformationMatrix;
+    std::vector<std::pair<std::string, size_t>> irreps;
+    std::vector<Eigen::MatrixXd> AOBasisReps;
+    Eigen::MatrixXd transform(const Eigen::MatrixXd& matrix) const
+    {
+        return transformationMatrix.transpose() * matrix * transformationMatrix;
+    }
+    Eigen::MatrixXd inverseTransform(const Eigen::MatrixXd& matrix) const
+    {
+        return transformationMatrix * matrix * transformationMatrix.transpose();
+    }
+    Eigen::MatrixXd symmetrize(const Eigen::MatrixXd& matrix) const
+    {
+        Eigen::MatrixXd symMatrix = Eigen::MatrixXd::Zero(matrix.rows(), matrix.cols());
+        for (const auto& R : AOBasisReps) { symMatrix += R.transpose() * matrix * R; }
+        symMatrix /= static_cast<double>(AOBasisReps.size());
+        return symMatrix;
+    }
+};
+
+/**
+ * Builds the Symmetry Adapted Linear Combinations (SALCs) of the atomic orbital basis.
+ * This function uses the projection operators to construct the SALCs.
+ *
+ * @param pointGroup The PointGroup object representing the point group of the molecule.
+ * @param aos The atomic orbital basis.
+ * @param tol The tolerance for numerical comparisons.
+ * @return A SALCs object containing the transformation matrix U, the irreps and their counts, and the AO basis
+ * representations of the symmetry operations.
+ */
+SALCs buildSALCs(const PointGroup& pointGroup, const std::vector<AtomicOrbital>& aos, double tol);
 
 } // namespace Symmetry

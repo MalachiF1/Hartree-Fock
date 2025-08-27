@@ -1,6 +1,7 @@
 #include "Symmetry/Symmetry.hpp"
 
 #include "Eigen/Core"
+#include "Symmetry/CharacterTable.hpp"
 #include "Symmetry/PointGroup.hpp"
 #include "Symmetry/SymmetryOperation.hpp"
 #include "Utils.hpp"
@@ -8,6 +9,8 @@
 #include <algorithm>
 #include <cmath>
 #include <functional>
+#include <iomanip>
+#include <iostream>
 #include <map>
 #include <numeric>
 #include <unordered_set>
@@ -367,6 +370,7 @@ void alignCanonically(
 
             [[fallthrough]];
         }
+        case PointGroup::Cs: [[fallthrough]];
         case PointGroup::Cn: [[fallthrough]];
         case PointGroup::S2n:
         {
@@ -1281,6 +1285,9 @@ void classifyReflectionPlanes(
 
 PointGroup classifyPointGroup(const std::vector<Atom>& geometry, const Vec3& principalMoments, double tol)
 {
+    if (geometry.size() == 1)
+        return PointGroup(PointGroup::Kh, 1, {SymmetryOperation::Identity()});
+
     auto sortedMoments = principalMoments;
     std::sort(sortedMoments.begin(), sortedMoments.end());
 
@@ -1624,107 +1631,6 @@ bool areGeometriesSuperimposable(const std::vector<Atom>& geometry1, const std::
 }
 
 
-Eigen::MatrixXd getAOBasisRep(const SymmetryOperation& op, const std::vector<AtomicOrbital>& aos, double tol)
-{
-    size_t n_aos             = aos.size();
-    Eigen::MatrixXd D        = Eigen::MatrixXd::Zero(n_aos, n_aos);
-    const Eigen::Matrix3d& R = op.matrix;
-
-    for (size_t i = 0; i < n_aos; ++i)
-    {
-        const AtomicOrbital& ao                = aos[i];
-        const Vec3& center                     = ao.center;
-        const Eigen::Vector3i& angularMomentum = ao.angularMomentum;
-
-        Vec3 newCenter = R * center;
-
-        // get indicies of atomic orbitals that are on the new center after the symmetry operation
-        std::vector<size_t> AOsOnNewCenter;
-        for (size_t j = 0; j < n_aos; ++j)
-        {
-            if (areEqual(aos[j].center, newCenter, tol))
-                AOsOnNewCenter.push_back(j);
-        }
-
-        if (AOsOnNewCenter.empty())
-            continue;
-
-        int L = angularMomentum.sum();
-
-        std::vector<Vec3> components;
-        if (L > 0)
-        {
-            components.reserve(L);
-            for (int k = 0; k < 3; ++k)
-            {
-                for (int l = 0; l < angularMomentum[k]; ++l) { components.emplace_back(R * Eigen::Vector3d::Unit(k)); }
-            }
-        }
-
-        for (size_t j : AOsOnNewCenter)
-        {
-            if (!AtomicOrbital::sameSubshell(aos[j], ao))
-                continue;
-
-            const Eigen::Vector3i& targetAM = aos[j].angularMomentum;
-
-            if (L == 0)
-                D(j, i) = 1.0;
-            else
-            {
-                // recursive function to calculate the coefficient
-                std::function<double(size_t, const Eigen::Vector3i&, double)> calculateCartesianCoefficient =
-                    [&](size_t currentIndex, const Eigen::Vector3i& currentAMCounts, double currentProduct) -> double
-                {
-                    // Base case: All compnents have been processed
-                    if (currentIndex == components.size())
-                    {
-                        // If the accumulated angular momentum matches the target, return the product.
-                        if (currentAMCounts == targetAM)
-                            return currentProduct;
-                        else
-                            return 0.0; // Otherwise, this path doesn't contribute.
-                    }
-
-                    double sumOfContributions = 0.0;
-
-                    const Vec3& comp = components[currentIndex];
-
-                    // Try to assign the current compnent's x-coordinate
-                    if (currentAMCounts.x() < targetAM.x())
-                    {
-                        sumOfContributions += calculateCartesianCoefficient(
-                            currentIndex + 1, currentAMCounts + Eigen::Vector3i(1, 0, 0), currentProduct * comp.x()
-                        );
-                    }
-
-                    // Try to assign the current component's y-coordinate
-                    if (currentAMCounts.y() < targetAM.y())
-                    {
-                        sumOfContributions += calculateCartesianCoefficient(
-                            currentIndex + 1, currentAMCounts + Eigen::Vector3i(0, 1, 0), currentProduct * comp.y()
-                        );
-                    }
-
-                    // Try to assign the current component's z-coordinate
-                    if (currentAMCounts.z() < targetAM.z())
-                    {
-                        sumOfContributions += calculateCartesianCoefficient(
-                            currentIndex + 1, currentAMCounts + Eigen::Vector3i(0, 0, 1), currentProduct * comp.z()
-                        );
-                    }
-
-                    return sumOfContributions;
-                };
-
-                D(j, i) = calculateCartesianCoefficient(0, Eigen::Vector3i::Zero(), 1.0);
-            }
-        }
-    }
-    return D;
-}
-
-
 bool isSymmetryOperation(const std::vector<Atom>& geometry, const Eigen::Matrix3d& operation, double tol)
 {
     std::vector<Atom> transformedGeometry;
@@ -1780,5 +1686,307 @@ bool hasInversion(const std::vector<Atom>& geometry, double tol)
     Eigen::Matrix3d inversionMatrix = -Eigen::Matrix3d::Identity();
     return isSymmetryOperation(geometry, inversionMatrix, tol);
 }
+
+
+Eigen::MatrixXd getAOBasisRep(const SymmetryOperation& op, const std::vector<AtomicOrbital>& aos, double tol)
+{
+    size_t n_aos      = aos.size();
+    Eigen::MatrixXd D = Eigen::MatrixXd::Zero(n_aos, n_aos);
+
+    const Eigen::Matrix3d& R  = op.matrix;
+    const Eigen::Matrix3d& Rt = op.matrix.transpose();
+
+    Eigen::Matrix<double, 6, 6> D_d;
+    const auto &Rxx = Rt(0, 0), Rxy = Rt(0, 1), Rxz = Rt(0, 2);
+    const auto &Ryx = Rt(1, 0), Ryy = Rt(1, 1), Ryz = Rt(1, 2);
+    const auto &Rzx = Rt(2, 0), Rzy = Rt(2, 1), Rzz = Rt(2, 2);
+
+    // Correct transformation formulas for the 6 Cartesian d-orbitals
+    D_d << Rxx * Rxx, Rxy * Rxy, Rxz * Rxz, 2 * Rxx * Rxy, 2 * Rxx * Rxz, 2 * Rxy * Rxz, Ryx * Ryx, Ryy * Ryy,
+        Ryz * Ryz, 2 * Ryx * Ryy, 2 * Ryx * Ryz, 2 * Ryy * Ryz, Rzx * Rzx, Rzy * Rzy, Rzz * Rzz, 2 * Rzx * Rzy,
+        2 * Rzx * Rzz, 2 * Rzy * Rzz, Rxx * Ryx, Rxy * Ryy, Rxz * Ryz, (Rxx * Ryy) + (Ryx * Rxy),
+        (Rxx * Ryz) + (Ryx * Rxz), (Rxy * Ryz) + (Ryy * Rxz), (Rxx * Rzx), (Rxy * Rzy), (Rxz * Rzz),
+        (Rxx * Rzy) + (Rzx * Rxy), (Rxx * Rzz) + (Rzx * Rxz), (Rxy * Rzz) + (Rzy * Rxz), (Ryx * Rzx), (Ryy * Rzy),
+        (Ryz * Rzz), (Ryx * Rzy) + (Rzx * Ryy), (Ryx * Rzz) + (Rzx * Ryz), (Ryy * Rzz) + (Rzy * Ryz);
+
+    for (size_t i = 0; i < n_aos; ++i)
+    {
+        const AtomicOrbital& ao                = aos[i];
+        const Vec3& center                     = ao.center;
+        const Eigen::Vector3i& angularMomentum = ao.angularMomentum;
+
+        Vec3 newCenter = R * center;
+
+        // get indicies of atomic orbitals that are on the new center after the symmetry operation
+        std::vector<size_t> AOsOnNewCenter;
+        for (size_t j = 0; j < n_aos; ++j)
+        {
+            if (areEqual(aos[j].center, newCenter, tol))
+                AOsOnNewCenter.push_back(j);
+        }
+
+        if (AOsOnNewCenter.empty())
+            continue;
+
+        int L = angularMomentum.sum();
+
+        // std::vector<Vec3> components;
+        // if (L > 0)
+        // {
+        //     components.reserve(L);
+        //     for (int k = 0; k < 3; ++k)
+        //     {
+        //         for (int l = 0; l < angularMomentum[k]; ++l) { components.emplace_back(R.col(k)); }
+        //     }
+        // }
+        for (size_t j : AOsOnNewCenter)
+        {
+            if (!AtomicOrbital::sameSubshell(aos[j], ao))
+                continue;
+
+            const Eigen::Vector3i& targetAM = aos[j].angularMomentum;
+
+            if (L == 0)
+                D(j, i) = 1.0;
+            else if (L == 1)
+            {
+                int source_axis = -1, target_axis = -1;
+                for (int axis = 0; axis < 3; ++axis)
+                {
+                    if (ao.angularMomentum[axis] == 1)
+                        source_axis = axis;
+                    if (aos[j].angularMomentum[axis] == 1)
+                        target_axis = axis;
+                }
+                if (source_axis != -1 && target_axis != -1)
+                {
+                    D(j, i) = R(target_axis, source_axis);
+                }
+            }
+            else if (L == 2)
+            {
+
+                auto mapAMtoIndex = [](const Eigen::Vector3i& am) -> int
+                {
+                    if (am == Eigen::Vector3i(2, 0, 0))
+                        return 0; // x^2
+                    else if (am == Eigen::Vector3i(0, 2, 0))
+                        return 1; // y^2
+                    else if (am == Eigen::Vector3i(0, 0, 2))
+                        return 2; // z^2
+                    else if (am == Eigen::Vector3i(1, 1, 0))
+                        return 3; // xy
+                    else if (am == Eigen::Vector3i(1, 0, 1))
+                        return 4; // xz
+                    else if (am == Eigen::Vector3i(0, 1, 1))
+                        return 5; // yz
+                    else
+                        throw std::runtime_error("Invalid angular momentum for d orbital.");
+                };
+
+                int row = mapAMtoIndex(targetAM);
+                int col = mapAMtoIndex(angularMomentum);
+                D(j, i) = D_d(row, col);
+            }
+            // else
+            // {
+            //     // recursive function to calculate the coefficient
+            //     std::function<double(size_t, const Eigen::Vector3i&, double)> calculateCartesianCoefficient =
+            //         [&](size_t currentIndex, const Eigen::Vector3i& currentAMCounts, double currentProduct) -> double
+            //     {
+            //         // Base case: All compnents have been processed
+            //         if (currentIndex == components.size())
+            //         {
+            //             // If the accumulated angular momentum matches the target, return the product.
+            //             if (currentAMCounts == targetAM)
+            //                 return currentProduct;
+            //             else
+            //                 return 0.0; // Otherwise, this path doesn't contribute.
+            //         }
+            //
+            //         double sumOfContributions = 0.0;
+            //
+            //         const Vec3& comp = components[currentIndex];
+            //
+            //         // Try to assign the current compnent's x-coordinate
+            //         if (currentAMCounts.x() < targetAM.x())
+            //         {
+            //             sumOfContributions += calculateCartesianCoefficient(
+            //                 currentIndex + 1, currentAMCounts + Eigen::Vector3i(1, 0, 0), currentProduct * comp.x()
+            //             );
+            //         }
+            //
+            //         // Try to assign the current component's y-coordinate
+            //         if (currentAMCounts.y() < targetAM.y())
+            //         {
+            //             sumOfContributions += calculateCartesianCoefficient(
+            //                 currentIndex + 1, currentAMCounts + Eigen::Vector3i(0, 1, 0), currentProduct * comp.y()
+            //             );
+            //         }
+            //
+            //         // Try to assign the current component's z-coordinate
+            //         if (currentAMCounts.z() < targetAM.z())
+            //         {
+            //             sumOfContributions += calculateCartesianCoefficient(
+            //                 currentIndex + 1, currentAMCounts + Eigen::Vector3i(0, 0, 1), currentProduct * comp.z()
+            //             );
+            //         }
+            //
+            //         return sumOfContributions;
+            //     };
+            //
+            //     D(j, i) = calculateCartesianCoefficient(0, Eigen::Vector3i::Zero(), 1.0);
+            // }
+        }
+    }
+    return D;
+}
+
+
+ProjectionOperators buildProjectionOperators(const PointGroup& pointGroup, const std::vector<AtomicOrbital>& aos, double tol)
+{
+    const std::vector<SymmetryOperation>& operations = pointGroup.operations;
+    std::vector<Eigen::MatrixXd> AOBasisReps; // D(R)
+    AOBasisReps.reserve(operations.size());
+
+    std::vector<std::vector<SymmetryOperation>> classes = getClasses(operations, tol);
+    std::vector<std::string> classNames                 = nameClasses(classes, pointGroup, tol);
+
+    const CharacterTable& charTable = getCharacterTable(pointGroup);
+    std::vector<Eigen::MatrixXd> projectionOperators;
+    std::vector<std::string> irrepNames;
+
+    projectionOperators.reserve(charTable.irrepNames.size());
+
+    for (size_t i = 0; i < charTable.irrepNames.size(); ++i)
+    {
+        auto h   = static_cast<double>(pointGroup.order);
+        double l = 1;
+        if (charTable.irrepNames[i].at(0) == 'E')
+            l = 2;
+        else if (charTable.irrepNames[i].at(0) == 'T')
+            l = 3;
+        else if (charTable.irrepNames[i].at(0) == 'G')
+            l = 4;
+        else if (charTable.irrepNames[i].at(0) == 'H')
+            l = 5;
+
+        Eigen::MatrixXd P = Eigen::MatrixXd::Zero(aos.size(), aos.size());
+        for (size_t j = 0; j < classes.size(); ++j)
+        {
+            auto it = std::find(charTable.classNames.begin(), charTable.classNames.end(), classNames[j]);
+
+            if (it == charTable.classNames.end())
+            {
+                std::cerr << "Class " << classNames[j] << " not found in character table." << std::endl;
+                continue;
+            }
+
+            size_t index = std::distance(charTable.classNames.begin(), it);
+
+            double character = charTable.characters[i][index];
+            for (const auto& op : classes[j])
+            {
+                Eigen::MatrixXd R = getAOBasisRep(op, aos, tol);
+                P += character * R;
+                if (i == 0)
+                    AOBasisReps.push_back(R);
+            }
+        }
+        P *= (l / h);
+        projectionOperators.push_back(P);
+        irrepNames.push_back(charTable.irrepNames[i]);
+    }
+
+    return {irrepNames, projectionOperators, AOBasisReps};
+}
+
+SALCs buildSALCs(const PointGroup& pointGroup, const std::vector<AtomicOrbital>& aos, double tol)
+{
+    auto [irrepNames, projectionOperators, AOBasisReps] = buildProjectionOperators(pointGroup, aos, tol);
+
+    std::vector<Eigen::VectorXd> finalSALCs;
+    finalSALCs.reserve(aos.size());
+
+    std::vector<std::pair<std::string, size_t>> irreps;
+    irreps.reserve(projectionOperators.size());
+
+    for (size_t i = 0; i < projectionOperators.size(); ++i)
+    {
+        const auto& P         = projectionOperators[i];
+        const auto& irrepName = irrepNames[i];
+
+        Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> solver(P);
+        Eigen::VectorXd eigenvalues  = solver.eigenvalues();
+        Eigen::MatrixXd eigenvectors = solver.eigenvectors();
+
+        std::vector<Eigen::VectorXd> subspace;
+        for (int i = 0; i < eigenvalues.size(); ++i)
+        {
+            if (areEqual(eigenvalues(i), 1.0, tol))
+                subspace.emplace_back(eigenvectors.col(i));
+        }
+
+        if (subspace.empty())
+            continue;
+
+        // Orthonormalize the degenerate subspace (Gram-Schmidt / QR)
+        Eigen::MatrixXd S(aos.size(), subspace.size());
+        for (size_t j = 0; j < subspace.size(); ++j) { S.col(j) = subspace[j]; }
+        Eigen::HouseholderQR<Eigen::MatrixXd> qr(S);
+        Eigen::MatrixXd orthoSubspace = qr.householderQ() * Eigen::MatrixXd::Identity(S.rows(), S.cols());
+
+        // Canonical rotation for degenerate subspace (z-axis)
+        if (orthoSubspace.cols() > 1)
+        {
+            // Identify orbitals with z-character
+            std::vector<int> zIndices;
+            for (size_t k = 0; k < aos.size(); ++k)
+                if (aos[k].angularMomentum.z() > 0)
+                    zIndices.push_back(k);
+
+            if (!zIndices.empty())
+            {
+                // Build submatrix with rows corresponding to z-orbitals
+                Eigen::MatrixXd S_z(zIndices.size(), orthoSubspace.cols());
+                for (size_t i = 0; i < zIndices.size(); ++i) S_z.row(i) = orthoSubspace.row(zIndices[i]);
+
+                // Perform SVD: S_z = U * Sigma * V^T
+                Eigen::JacobiSVD<Eigen::MatrixXd> svd(S_z, Eigen::ComputeFullU | Eigen::ComputeFullV);
+                Eigen::MatrixXd V = svd.matrixV();
+
+                // Rotate the degenerate subspace
+                orthoSubspace = orthoSubspace * V;
+            }
+        }
+
+        size_t multiplicity = orthoSubspace.cols();
+        for (int j = 0; j < orthoSubspace.cols(); ++j)
+        {
+            Eigen::VectorXd vec = orthoSubspace.col(j);
+
+            // enforce first non-zero element to be positive (consistent phase)
+            for (int k = 0; k < vec.size(); ++k)
+            {
+                if (std::abs(vec(k)) > tol)
+                {
+                    if (vec(k) < 0)
+                        vec = -vec;
+                    break;
+                }
+            }
+
+            finalSALCs.push_back(vec);
+        }
+
+        irreps.emplace_back(irrepName, multiplicity);
+    }
+
+    Eigen::MatrixXd U(aos.size(), finalSALCs.size());
+    for (size_t i = 0; i < finalSALCs.size(); ++i) { U.col(i) = finalSALCs[i]; }
+
+    return {U, irreps, AOBasisReps};
+}
+
 
 } // namespace Symmetry

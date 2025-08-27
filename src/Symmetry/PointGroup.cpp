@@ -28,6 +28,7 @@ std::string PointGroup::toString() const
     std::string n_str = std::to_string(n);
     switch (name)
     {
+        case PointGroupName::Kh: return "Kh";
         case PointGroupName::Dinfh: return "D∞h";
         case PointGroupName::Cinfh: return "C∞h";
         case PointGroupName::I: return "I";
