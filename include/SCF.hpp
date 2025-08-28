@@ -23,6 +23,9 @@ struct SCFOptions
     bool printFullMOs        = false;
     bool unrestricted        = false;
     int guessMix             = false;
+    int damp                 = 0;
+    size_t maxDampIter       = 0;
+    double stopDampThresh    = 0;
 };
 
 /**
@@ -71,6 +74,10 @@ class SCF
     ElectronRepulsionTensor Vee; // Two-electron repulsion integrals
 
     // SCF state variables that change during iterations.
+    size_t iteration;                  // Current iteration number
+    double deltaE;                     // Change in electronic energy from last iteration
+    double deltaD;                     // Change in total density matrix from last iteration
+    double DIISError;                  // Current DIIS error norm
     double electronicEnergy;           // Electronic energy
     Eigen::MatrixXd D_alpha;           // Density matrix
     Eigen::MatrixXd F_alpha;           // Fock matrix
@@ -113,26 +120,17 @@ class SCF
      */
     void diagonalizeAndUpdate();
 
+    /**
+     * Computes the expectation value of the total spin squared operator <S^2>.
+     *
+     * @return The computed value of <S^2>.
+     */
     double computeSpinSquared() const;
 
     /**
-     * Prints the status of a single SCF iteration.
-     *
-     * @param iter The current iteration number.
-     * @param dE The change in electronic energy from the previous iteration.
-     * @param dD The change in density matrix from the previous iteration.
+     * Write the status of a single SCF iteration to the output.
      */
-    void printIteration(int iter, double dE, double dD) const;
-
-    /**
-     * Prints the status of a single SCF iteration.
-     *
-     * @param iter The current iteration number.
-     * @param dE The change in electronic energy from the previous iteration.
-     * @param dD The change in density matrix from the previous iteration.
-     * @param DIISError The DIIS error norm for the current iteration.
-     */
-    void printIteration(int iter, double dE, double dD, double DIISError) const; // overload for DIIS
+    void printIteration() const;
 
     /**
      * Prints the final results of the SCF calculation, including whether it converged and the final electronic energy.
@@ -169,5 +167,10 @@ class SCF
         size_t MOsPerRow
     ) const;
 
+    /**
+     * Returns a string summarizing the SCF job specifications.
+     *
+     * @return A formatted string representing the SCF job specifications.
+     */
     std::string printJobSpec() const;
 };

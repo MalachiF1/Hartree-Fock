@@ -200,10 +200,20 @@ SCFOptions Input::readSCFBlock(const std::string& SCFBlock)
         else if (tokenLwr == "energy_tol")
         {
             SCFStream >> options.energyTol;
+            if (options.energyTol < 0)
+                throw std::runtime_error(
+                    "Invalid value for " + token + " in $scf block: " + std::to_string(options.energyTol)
+                    + ". Must be non-negative."
+                );
         }
         else if (tokenLwr == "density_tol")
         {
             SCFStream >> options.densityTol;
+            if (options.densityTol < 0)
+                throw std::runtime_error(
+                    "Invalid value for " + token + " in $scf block: " + std::to_string(options.densityTol)
+                    + ". Must be non-negative."
+                );
         }
         else if (tokenLwr == "diis")
         {
@@ -219,14 +229,23 @@ SCFOptions Input::readSCFBlock(const std::string& SCFBlock)
         else if (tokenLwr == "diis_size")
         {
             SCFStream >> options.DIISmaxSize;
+            if (options.DIISmaxSize < 1)
+                throw std::runtime_error(token + " in $scf block must be greater than 0.");
         }
         else if (tokenLwr == "diis_start")
         {
             SCFStream >> options.DIISstart;
+            if (options.DIISstart < 1)
+                throw std::runtime_error(token + " in $scf block must be greater than 0.");
         }
         else if (tokenLwr == "diis_tol")
         {
             SCFStream >> options.DIISErrorTol;
+            if (options.DIISErrorTol < 0)
+                throw std::runtime_error(
+                    "Invalid value for " + token + " in $scf block: " + std::to_string(options.DIISErrorTol)
+                    + ". Must be non-negative."
+                );
         }
         else if (tokenLwr == "direct")
         {
@@ -242,10 +261,20 @@ SCFOptions Input::readSCFBlock(const std::string& SCFBlock)
         else if (tokenLwr == "schwartz_thresh")
         {
             SCFStream >> options.schwartzThreshold;
+            if (options.schwartzThreshold < 0)
+                throw std::runtime_error(
+                    "Invalid value for " + token + " in $scf block: " + std::to_string(options.schwartzThreshold)
+                    + ". Must be non-negative."
+                );
         }
         else if (tokenLwr == "density_thresh")
         {
             SCFStream >> options.densityThreshold;
+            if (options.densityThreshold < 0)
+                throw std::runtime_error(
+                    "Invalid value for " + token + " in $scf block: " + std::to_string(options.densityThreshold)
+                    + ". Must be non-negative."
+                );
         }
         else if (tokenLwr == "symmetry")
         {
@@ -258,10 +287,6 @@ SCFOptions Input::readSCFBlock(const std::string& SCFBlock)
             else
                 throw std::runtime_error("Invalid boolean value for " + token + " in $scf block: " + boolStr);
         }
-        else if (tokenLwr == "symmetry_tol")
-        {
-            SCFStream >> options.symmetryTolerance;
-        }
         else if (tokenLwr == "print_full_mos")
         {
             std::string boolStr;
@@ -273,9 +298,14 @@ SCFOptions Input::readSCFBlock(const std::string& SCFBlock)
             else
                 throw std::runtime_error("Invalid boolean value for " + token + " in $scf block: " + boolStr);
         }
-        else if (tokenLwr == "symmetry_tolerance")
+        else if (tokenLwr == "symmetry_tol")
         {
             SCFStream >> options.symmetryTolerance;
+            if (options.symmetryTolerance < 0)
+                throw std::runtime_error(
+                    "Invalid value for " + token + " in $scf block: " + std::to_string(options.symmetryTolerance)
+                    + ". Must be non-negative."
+                );
         }
         else if (tokenLwr == "unrestricted")
         {
@@ -310,6 +340,33 @@ SCFOptions Input::readSCFBlock(const std::string& SCFBlock)
                 throw std::runtime_error(
                     "Invalid value for " + token + " in $scf block: \"" + mixStr
                     + "\". Must be an integer between 0 and 10"
+                );
+        }
+        else if (tokenLwr == "damp")
+        {
+            SCFStream >> options.damp;
+            if (options.damp < 0 || options.damp > 100)
+                throw std::runtime_error(
+                    "Invalid integer value for " + token + " in $scf block: " + std::to_string(options.damp)
+                    + ". Must be between 0 and 100."
+                );
+        }
+        else if (tokenLwr == "max_damp_cycles")
+        {
+            SCFStream >> options.maxDampIter;
+            if (options.maxDampIter <= 0)
+                throw std::runtime_error(
+                    "Invalid value for " + token + " in $scf block: " + std::to_string(options.maxDampIter)
+                    + ". Must be positive integer."
+                );
+        }
+        else if (tokenLwr == "stop_damp_thresh")
+        {
+            SCFStream >> options.stopDampThresh;
+            if (options.stopDampThresh < 0)
+                throw std::runtime_error(
+                    "Invalid value for " + token + " in $scf block: " + std::to_string(options.stopDampThresh)
+                    + ". Must be non-negative."
                 );
         }
         else

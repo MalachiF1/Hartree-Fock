@@ -25,10 +25,36 @@ void SCF::run()
     if (this->options.useDIIS) // Initialize the DIIS handler with the specified maximum size.
         diis_handler = std::make_unique<DIIS>(this->options.DIISmaxSize);
 
-    this->output->write("\n--- Starting SCF Iterations ---\n");
+    auto center = [](const std::string& s, size_t width) -> std::string
+    {
+        if (s.length() >= width)
+            return s;
+        size_t totalPadding = width - s.length();
+        size_t paddingLeft  = totalPadding / 2;
+        size_t paddingRight = totalPadding - paddingLeft;
+        return std::string(paddingLeft, ' ') + s + std::string(paddingRight, ' ');
+    };
+
+    // Print header for the iteration table.
+    size_t width = 45;
+    if (this->options.useDIIS)
+        width += 15;
+    if (this->options.damp > 0)
+        width += 15;
+    std::stringstream ss;
+    ss << "\n";
+    for (size_t i = 0; i < width; ++i) ss << "-";
+    ss << "\n";
+    ss << center("Iteration", 15) << center("ΔE", 15) << center("ΔD", 18);
+    if (this->options.useDIIS)
+        ss << center("DIIS Error", 12);
+    ss << "\n";
+    for (size_t i = 0; i < width; ++i) ss << "-";
+    ss << "\n";
+    this->output->write(ss.str());
 
     // SCF cycles
-    for (size_t iteration = 0; iteration < this->options.maxIter; ++iteration)
+    for (this->iteration = 0; this->iteration < this->options.maxIter; ++this->iteration)
     {
         // Store the energy and density from the previous iteration to check for convergence.
         double lastElectronicEnergy = this->electronicEnergy;
@@ -61,26 +87,27 @@ void SCF::run()
         this->diagonalizeAndUpdate();
 
         // Calculate the change in energy and density.
-        double dE = std::abs(this->electronicEnergy - lastElectronicEnergy);
-        double dD = (this->D_tot - D_last).norm();
+        this->deltaE = std::abs(this->electronicEnergy - lastElectronicEnergy);
+        this->deltaD = (this->D_tot - D_last).norm();
+        if (this->options.useDIIS)
+            this->DIISError = diis_handler->getErrorNorm();
 
         // Print the current iteration results.
-        if (this->options.useDIIS)
-            this->printIteration(iteration + 1, dE, dD, diis_handler->getErrorNorm());
-        else
-            this->printIteration(iteration + 1, dE, dD);
+        this->printIteration();
 
         // Check for convergence.
-        if (dE < this->options.energyTol && dD < this->options.densityTol
+        if (this->deltaE < this->options.energyTol && this->deltaD < this->options.densityTol
             && (!this->options.useDIIS || diis_handler->getErrorNorm() < this->options.DIISErrorTol))
         {
             // basis If converged, print the final results and exit.
+            this->output->writeSeperator('-', width);
             this->printFinalResults(true);
             return;
         }
     }
 
     // If the loop finishes, the calculation did not converge.
+    this->output->writeSeperator('-', width);
     this->printFinalResults(false);
 }
 
@@ -419,7 +446,15 @@ void SCF::diagonalizeAndUpdate()
 
     // Form the new density matrix from the occupied orbitals.
     Eigen::MatrixXd C_alpha_occ = this->C_alpha.leftCols(this->occupiedCountAlpha);
-    this->D_alpha               = C_alpha_occ * C_alpha_occ.transpose();
+
+    double a = 0; // damping factor
+    if (this->options.damp > 0 && this->options.maxDampIter != 0 && this->options.maxDampIter > this->iteration
+        && this->deltaE > this->options.stopDampThresh)
+    {
+        a = static_cast<double>(this->options.damp) / 100;
+    }
+
+    this->D_alpha = (1 - a) * C_alpha_occ * C_alpha_occ.transpose() + a * this->D_alpha;
 
     if (this->options.unrestricted)
     {
@@ -428,7 +463,7 @@ void SCF::diagonalizeAndUpdate()
         this->C_beta               = this->X * beta_solver.eigenvectors();
         this->eigenvalues_beta     = beta_solver.eigenvalues();
         Eigen::MatrixXd C_beta_occ = this->C_beta.leftCols(this->occupiedCountBeta);
-        this->D_beta               = C_beta_occ * C_beta_occ.transpose();
+        this->D_beta               = (1 - a) * C_beta_occ * C_beta_occ.transpose() + a * this->D_beta;
     }
     else
     {
@@ -456,20 +491,48 @@ double SCF::computeSpinSquared() const
     return (Sz * (Sz + 1)) + this->occupiedCountBeta - alphaBetaOverlap;
 }
 
-void SCF::printIteration(int iter, double dE, double dD) const
+
+void SCF::printIteration() const
 {
     std::stringstream ss;
-    ss << "Iteration " << std::setw(3) << iter << ": "
-       << " | ΔE = " << std::scientific << dE << " | ΔD = " << dD << std::endl;
-    this->output->write(ss.str());
-}
 
+    auto centerDouble = [](const double val, size_t width) -> std::string
+    {
+        std::ostringstream oss;
+        oss << std::scientific << std::setprecision(5) << val;
+        std::string s = oss.str();
+        if (s.length() >= width)
+            return s;
+        size_t totalPadding = width - s.length();
+        size_t paddingLeft  = totalPadding / 2;
+        size_t paddingRight = totalPadding - paddingLeft;
+        return std::string(paddingLeft, ' ') + s + std::string(paddingRight, ' ');
+    };
 
-void SCF::printIteration(int iter, double dE, double dD, double DIISError) const
-{
-    std::stringstream ss;
-    ss << "Iteration " << std::setw(3) << iter << ": "
-       << " | ΔE = " << std::scientific << dE << " | ΔD = " << dD << " | DIIS error = " << DIISError << std::endl;
+    auto centerStr = [](const std::string s, size_t width) -> std::string
+    {
+        if (s.length() >= width)
+            return s;
+        size_t totalPadding = width - s.length();
+        size_t paddingLeft  = totalPadding / 2;
+        size_t paddingRight = totalPadding - paddingLeft;
+        return std::string(paddingLeft, ' ') + s + std::string(paddingRight, ' ');
+    };
+
+    ss << centerStr(std::to_string(this->iteration + 1), 15) << centerDouble(this->deltaE, 15)
+       << centerDouble(this->deltaD, 15);
+    if (this->options.useDIIS)
+        ss << centerDouble(this->DIISError, 15);
+
+    if (this->options.damp > 0 && this->options.maxDampIter != 0 && this->options.maxDampIter > this->iteration
+        && this->deltaE > this->options.stopDampThresh)
+    {
+        std::stringstream dampSS;
+        dampSS << "damp: " << std::fixed << std::setprecision(2) << static_cast<double>(this->options.damp) / 100;
+        ss << centerStr(dampSS.str(), 15);
+    }
+    ss << std::endl;
+
     this->output->write(ss.str());
 }
 
@@ -515,7 +578,7 @@ void SCF::printFinalResults(bool converged) const
         ss << "\n";
         for (size_t i = 0; i < 99; ++i) { ss << "-"; }
         ss << "\n";
-        whitespaceWidth = (99 - std::string("Beta Orbital Energies (a.u.)").length()) / 2;
+        whitespaceWidth = (99 - std::string("Beta Orbitaa Energies (a.u.)").length()) / 2;
         ss << std::string(whitespaceWidth, ' ') << "Beta Orbital Energies (a.u.)" << std::string(whitespaceWidth, ' ')
            << "\n";
         for (size_t i = 0; i < 99; ++i) { ss << "-"; }
@@ -698,25 +761,44 @@ std::string SCF::printJobSpec() const
 {
 
     std::stringstream ss;
-    ss << "Starting " << (this->options.unrestricted ? "UHF" : "RHF") << " calculation.\n";
-    ss << "Maximum iterations: " << this->options.maxIter << "\n";
-    ss << "Energy convergence threshold: " << this->options.energyTol << "\n";
-    ss << "Density convergence threshold: " << this->options.densityTol << "\n";
-    if (this->options.useDIIS)
-    {
-        ss << "DIIS enabled. Size of DIIS history: " << this->options.DIISmaxSize << ", start from iteration: "
-           << this->options.DIISstart << ", error threshold: " << this->options.DIISErrorTol << "\n";
-    }
-    ss << "Schwartz screening threshold: " << this->options.schwartzThreshold << "\n";
+    ss << std::left;
+    ss << "Starting " << (this->options.unrestricted ? "UHF" : "RHF") << " calculation.\n\n";
+
+    ss << "Maximum iterations: " << std::fixed << this->options.maxIter << "\n";
+    ss << "Energy convergence threshold: " << std::scientific << this->options.energyTol << "\n";
+    ss << "Density convergence threshold: " << std::scientific << this->options.densityTol << "\n";
+    ss << "Schwartz screening threshold: " << std::scientific << this->options.schwartzThreshold << "\n";
+    ss << std::endl;
+
     if (this->options.direct)
     {
         ss << "Using direct SCF.\n";
-        ss << "Density screening threshold: " << this->options.densityThreshold << "\n";
+        ss << "Density screening threshold: " << std::scientific << this->options.densityThreshold << "\n";
+        ss << std::endl;
+    }
+    if (this->options.useDIIS)
+    {
+        ss << "DIIS enabled.\nSize of DIIS history: " << std::fixed << this->options.DIISmaxSize
+           << "\nStart DIIS from iteration: " << this->options.DIISstart
+           << "\nDIIS error threshold: " << std::scientific << this->options.DIISErrorTol << "\n";
+        ss << std::endl;
     }
     if (this->options.guessMix > 0)
     {
         ss << "Requested " << this->options.guessMix * 10 << "% mixing of HOMO and LUMO orbitals in initial guess.\n";
     }
+    if (this->options.damp > 0)
+    {
+        ss << "Damping enbaled. Mixing coefficient set to: " << std::fixed << std::setprecision(2)
+           << static_cast<double>(this->options.damp) / 100 << "\n";
+        if (this->options.maxDampIter != 0)
+            ss << "Damping will stop after itteration " << this->options.maxDampIter << "\n";
+        if (this->options.stopDampThresh != 0)
+            ss << "Damping will stop once ΔE < " << std::scientific << std::setprecision(6)
+               << this->options.stopDampThresh << "\n";
+        ss << std::endl;
+    }
+
     ss << "Molecule with " << this->occupiedCountAlpha << " alpha and " << this->occupiedCountBeta << " beta electrons.\n";
     ss << "Number of basis functions: " << this->basisCount << "\n";
     ss << "Geometry:\n";
