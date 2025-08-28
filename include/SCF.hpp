@@ -21,6 +21,8 @@ struct SCFOptions
     bool useSymmetry         = true;
     double symmetryTolerance = 1.0e-5;
     bool printFullMOs        = false;
+    bool unrestricted        = false;
+    int guessMix             = false;
 };
 
 /**
@@ -57,7 +59,8 @@ class SCF
 
     // SCF state variables that are constant throughout the calculation.
     size_t basisCount;           // number of basis functions
-    size_t occupiedCount;        // number of occupied orbitals
+    size_t occupiedCountAlpha;   // number of occupied orbitals
+    size_t occupiedCountBeta;    // number of occupied orbitals
     double nuclearEnergy;        // Nuclear repulsion energy
     Eigen::MatrixXd T;           // Kinetic energy matrix
     Eigen::MatrixXd V;           // Nuclear attraction matrix
@@ -68,11 +71,16 @@ class SCF
     ElectronRepulsionTensor Vee; // Two-electron repulsion integrals
 
     // SCF state variables that change during iterations.
-    double electronicEnergy;     // Electronic energy
-    Eigen::MatrixXd D;           // Density matrix
-    Eigen::MatrixXd F;           // Fock matrix
-    Eigen::MatrixXd C;           // MO coefficient matrix
-    Eigen::VectorXd eigenvalues; // Eigenvalues of the Fock matrix
+    double electronicEnergy;           // Electronic energy
+    Eigen::MatrixXd D_alpha;           // Density matrix
+    Eigen::MatrixXd F_alpha;           // Fock matrix
+    Eigen::MatrixXd C_alpha;           // MO coefficient matrix
+    Eigen::VectorXd eigenvalues_alpha; // Eigenvalues of the Fock matrix
+    Eigen::MatrixXd D_beta;
+    Eigen::MatrixXd F_beta;
+    Eigen::MatrixXd C_beta;
+    Eigen::VectorXd eigenvalues_beta;
+    Eigen::MatrixXd D_tot; // D_alpha + D_beta
 
     // Pointer to the DIIS object (if used).
     std::unique_ptr<DIIS> diis_handler;
@@ -104,6 +112,8 @@ class SCF
      * Diagonalizes the Fock matrix to obtain the molecular orbitals and updates the density matrix and coefficient matrix.
      */
     void diagonalizeAndUpdate();
+
+    double computeSpinSquared() const;
 
     /**
      * Prints the status of a single SCF iteration.
@@ -158,4 +168,6 @@ class SCF
         size_t precision,
         size_t MOsPerRow
     ) const;
+
+    std::string printJobSpec() const;
 };

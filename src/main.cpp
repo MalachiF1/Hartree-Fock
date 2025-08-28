@@ -39,6 +39,7 @@ int main(int argc, char* argv[])
         output->writeSeperator();
         output->write("\n");
 
+        // Run the SCF procedure.
         std::pair<Molecule, SCFOptions> inputData = input.read();
         SCF scf(inputData.first, inputData.second, output);
         scf.run();

@@ -98,6 +98,12 @@ std::pair<Molecule, SCFOptions> Input::read()
     Molecule molecule  = readMoleculeBlock(moleculeBlock.str(), basisBlock.str());
     SCFOptions options = readSCFBlock(SCFBlock.str());
 
+    if (!options.unrestricted && molecule.getMultiplicity() != 1)
+        throw std::runtime_error(
+            "Multiplicity set to" + std::to_string(molecule.getMultiplicity())
+            + " but the SCF method is restricted (RHF). Set multiplicity to 1 or use unrestricted (UHF) method."
+        );
+
     return {molecule, options};
 }
 
@@ -157,7 +163,13 @@ Molecule Input::readMoleculeBlock(const std::string& moleculeBlock, const std::s
     if (basisStream.fail())
         throw std::runtime_error("Error in basis set specification in $basis block.");
 
-    return Molecule(charge, multiplicity, basisSetName, geometry);
+    // Some basic validation
+    Molecule molecule(charge, multiplicity, basisSetName, geometry);
+
+    if (molecule.getElectronCount() + 1 < multiplicity || (molecule.getElectronCount() - multiplicity) % 2 == 0)
+        throw std::runtime_error("Invalid combination of charge and multiplicity.");
+
+    return molecule;
 }
 
 
@@ -182,6 +194,8 @@ SCFOptions Input::readSCFBlock(const std::string& SCFBlock)
         if (tokenLwr == "max_iter")
         {
             SCFStream >> options.maxIter;
+            if (options.maxIter == 0)
+                throw std::runtime_error(token + " in $scf block must be greater than 0.");
         }
         else if (tokenLwr == "energy_tol")
         {
@@ -263,6 +277,41 @@ SCFOptions Input::readSCFBlock(const std::string& SCFBlock)
         {
             SCFStream >> options.symmetryTolerance;
         }
+        else if (tokenLwr == "unrestricted")
+        {
+            std::string boolStr;
+            SCFStream >> boolStr;
+            if (toLowerString(boolStr) == "true" || boolStr == "1")
+                options.unrestricted = true;
+            else if (toLowerString(boolStr) == "false" || boolStr == "0")
+                options.unrestricted = false;
+            else
+                throw std::runtime_error("Invalid boolean value for " + token + " in $scf block: " + boolStr);
+        }
+        else if (tokenLwr == "guess_mix")
+        {
+            std::string mixStr;
+            SCFStream >> mixStr;
+            if (toLowerString(mixStr) == "true")
+                options.guessMix = 1;
+            else if (toLowerString(mixStr) == "false")
+                options.guessMix = 0;
+            else if (std::all_of(mixStr.begin(), mixStr.end(), ::isdigit))
+            {
+                int mixVal = std::stoi(mixStr);
+                if (mixVal < 0 || mixVal > 10)
+                    throw std::runtime_error(
+                        "Invalid integer value for " + token + " in $scf block: \"" + mixStr
+                        + "\". Must be between 0 and 10."
+                    );
+                options.guessMix = mixVal;
+            }
+            else
+                throw std::runtime_error(
+                    "Invalid value for " + token + " in $scf block: \"" + mixStr
+                    + "\". Must be an integer between 0 and 10"
+                );
+        }
         else
         {
             throw std::runtime_error("Unknown option in $scf block: " + token);
@@ -273,6 +322,11 @@ SCFOptions Input::readSCFBlock(const std::string& SCFBlock)
             throw std::runtime_error("Error reading value for option: " + token);
         }
     }
+
+    // Make some basic checks on the options.
+    if (options.guessMix > 0 && !options.unrestricted)
+        throw std::runtime_error("The guess_mix option can only be used with unrestricted calculations.");
+
 
     return options;
 }

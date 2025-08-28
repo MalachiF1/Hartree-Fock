@@ -3,29 +3,32 @@
 DIIS::DIIS(size_t maxSize) : maxSize(maxSize)
 {
     errorVectors.reserve(maxSize);
-    fockMatrices.reserve(maxSize);
+    alphaFockMatrices.reserve(maxSize);
+    betaFockMatrices.reserve(maxSize);
 }
 
 
-void DIIS::update(const Eigen::MatrixXd& F, const Eigen::MatrixXd& errorVector)
+void DIIS::update(const Eigen::MatrixXd& F_alpha, const Eigen::MatrixXd& F_beta, const Eigen::MatrixXd& errorVector)
 {
     // If the storage exceeds the maximum size, remove the oldest entry.
     if (errorVectors.size() >= maxSize)
     {
         errorVectors.erase(errorVectors.begin());
-        fockMatrices.erase(fockMatrices.begin());
+        alphaFockMatrices.erase(alphaFockMatrices.begin());
+        betaFockMatrices.erase(betaFockMatrices.begin());
     }
 
     // Add the new error vector and Fock matrix to the history.
     errorVectors.emplace_back(errorVector);
-    fockMatrices.emplace_back(F);
+    alphaFockMatrices.emplace_back(F_alpha);
+    betaFockMatrices.emplace_back(F_beta);
 }
 
 
-Eigen::MatrixXd DIIS::extrapolate(const Eigen::MatrixXd& F)
+std::pair<Eigen::MatrixXd, Eigen::MatrixXd> DIIS::extrapolate(const Eigen::MatrixXd& F_alpha, const Eigen::MatrixXd& F_beta)
 {
     if (errorVectors.empty())
-        return F; // Cannot extrapolate without history.
+        return {F_alpha, F_beta}; // Cannot extrapolate without history.
 
     Eigen::MatrixXd B = buildBMatrix();
     Eigen::VectorXd b = Eigen::VectorXd::Zero(B.rows());
@@ -35,10 +38,14 @@ Eigen::MatrixXd DIIS::extrapolate(const Eigen::MatrixXd& F)
     Eigen::VectorXd coeffs = B.colPivHouseholderQr().solve(b);
 
     // Use the coefficients to form the new extrapolated Fock matrix.
-    Eigen::MatrixXd newF = Eigen::MatrixXd::Zero(F.rows(), F.cols());
-    for (size_t i = 0; i < fockMatrices.size(); ++i) { newF += coeffs(i) * fockMatrices[i]; }
-
-    return newF;
+    Eigen::MatrixXd newF_alpha = Eigen::MatrixXd::Zero(F_alpha.rows(), F_alpha.cols());
+    Eigen::MatrixXd newF_beta  = Eigen::MatrixXd::Zero(F_beta.rows(), F_beta.cols());
+    for (size_t i = 0; i < alphaFockMatrices.size(); ++i)
+    {
+        newF_alpha += coeffs(i) * alphaFockMatrices[i];
+        newF_beta += coeffs(i) * betaFockMatrices[i];
+    }
+    return {newF_alpha, newF_beta};
 }
 
 
