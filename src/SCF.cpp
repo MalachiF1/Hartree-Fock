@@ -78,7 +78,7 @@ void SCF::run()
 
         // Diagonalize the Fock matrix and compute the new density and coefficients.
 
-        if (this->options.useDIIS && iteration >= this->options.DIISstart)
+        if (this->options.useDIIS)
         {
             // Extrapolate the orthogonal Fock matrix using DIIS.
             std::tie(this->F_alpha, this->F_beta) = diis_handler->extrapolate(this->F_alpha, this->F_beta);
@@ -779,7 +779,6 @@ std::string SCF::printJobSpec() const
     if (this->options.useDIIS)
     {
         ss << "DIIS enabled.\nSize of DIIS history: " << std::fixed << this->options.DIISmaxSize
-           << "\nStart DIIS from iteration: " << this->options.DIISstart
            << "\nDIIS error threshold: " << std::scientific << this->options.DIISErrorTol << "\n";
         ss << std::endl;
     }

@@ -3,15 +3,26 @@
 #include "Utils.hpp"
 
 #include <algorithm>
+#include <cstddef>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <numeric>
 #include <sstream>
 #include <string>
+#include <vector>
 
 Input::Input(const std::string& filename) : filename(filename) {}
 
+const std::vector<std::string>& Input::getWarnings() const
+{
+    return this->warnings;
+}
+
 std::pair<Molecule, SCFOptions> Input::read()
 {
+    this->warnings.clear();
+
     std::ifstream inputFile(this->filename);
     if (!inputFile.is_open())
     {
@@ -95,29 +106,40 @@ std::pair<Molecule, SCFOptions> Input::read()
     }
     inputFile.close();
 
-    Molecule molecule  = readMoleculeBlock(moleculeBlock.str(), basisBlock.str());
-    SCFOptions options = readSCFBlock(SCFBlock.str());
+    MoleculeSettings moleculeSettings = parseMoleculeBlock(moleculeBlock.str());
+    BasisSettings basisSettings       = parseBasisBlock(basisBlock.str());
+    SCFInputSettings scfInputSettings = parseSCFBlock(SCFBlock.str());
 
-    if (!options.unrestricted && molecule.getMultiplicity() != 1)
-        throw std::runtime_error(
-            "Multiplicity set to" + std::to_string(molecule.getMultiplicity())
-            + " but the SCF method is restricted (RHF). Set multiplicity to 1 or use unrestricted (UHF) method."
-        );
+    validateSettings(moleculeSettings, basisSettings, scfInputSettings, this->warnings);
+
+    Molecule molecule(
+        moleculeSettings.charge,
+        moleculeSettings.multiplicity,
+        basisSettings.basisName,
+        moleculeSettings.geometry,
+        scfInputSettings.scfOptions.useSymmetry,
+        scfInputSettings.scfOptions.symmetryTolerance
+    );
+
+    SCFOptions options = scfInputSettings.scfOptions;
+    if (!scfInputSettings.optionsSet[UNRESTRICTED])
+    {
+        options.unrestricted = molecule.getMultiplicity() != 1;
+    }
 
     return {molecule, options};
 }
 
-Molecule Input::readMoleculeBlock(const std::string& moleculeBlock, const std::string& basisBlock)
+Input::MoleculeSettings Input::parseMoleculeBlock(const std::string& moleculeBlock)
 {
     std::istringstream molStream(moleculeBlock);
-    int charge;
-    unsigned multiplicity;
-    std::vector<Atom> geometry;
-    molStream >> charge;
+    MoleculeSettings settings;
+
+    molStream >> settings.charge;
     if (molStream.fail())
         throw std::runtime_error("Invalid charge in $molecule block.");
 
-    molStream >> multiplicity;
+    molStream >> settings.multiplicity;
     if (molStream.fail())
         throw std::runtime_error("Invalid multiplicity in $molecule block.");
 
@@ -137,43 +159,144 @@ Molecule Input::readMoleculeBlock(const std::string& moleculeBlock, const std::s
         {
             throw std::runtime_error(
                 "Invalid coordinates in $molecule block for atom " + atomStr + ": '" + xStr + " " + yStr + " " + zStr
-                + "'"
+                + ""
             );
         }
 
         if (std::all_of(atomStr.begin(), atomStr.end(), ::isdigit))
         {
             unsigned atomicNumber = std::stoi(atomStr);
-            geometry.emplace_back(atomicNumber, Vec3(x, y, z));
+            settings.geometry.emplace_back(atomicNumber, Vec3(x, y, z));
         }
         else
         {
             auto it = Utils::nameToAtomicNumber.find(atomStr);
             if (it == Utils::nameToAtomicNumber.end())
                 throw std::runtime_error("Invalid atom symbol \"" + atomStr + "\" in $molecule block.");
-            geometry.emplace_back(it->second, Vec3(x, y, z));
+            settings.geometry.emplace_back(it->second, Vec3(x, y, z));
         }
     }
-    if (geometry.empty())
+    if (settings.geometry.empty())
         throw std::runtime_error("No atoms specified in $molecule block.");
 
-    std::istringstream basisStream(basisBlock);
-    std::string basisSetName;
-    basisStream >> basisSetName;
-    if (basisStream.fail())
-        throw std::runtime_error("Error in basis set specification in $basis block.");
-
-    // Some basic validation
-    Molecule molecule(charge, multiplicity, basisSetName, geometry);
-
-    if (molecule.getElectronCount() + 1 < multiplicity || (molecule.getElectronCount() - multiplicity) % 2 == 0)
-        throw std::runtime_error("Invalid combination of charge and multiplicity.");
-
-    return molecule;
+    return settings;
 }
 
+Input::BasisSettings Input::parseBasisBlock(const std::string& basisBlock)
+{
+    std::istringstream basisStream(basisBlock);
+    BasisSettings settings;
+    basisStream >> settings.basisName;
+    std::string extraToken;
+    if (basisStream.fail() || (basisStream >> extraToken))
+        throw std::runtime_error("Error in basis set specification in $basis block.");
+    return settings;
+}
 
-SCFOptions Input::readSCFBlock(const std::string& SCFBlock)
+void Input::validateSettings(
+    const MoleculeSettings& moleculeSettings,
+    const BasisSettings& basisSettings,
+    const SCFInputSettings& scfSettings,
+    std::vector<std::string>& warnings
+)
+{
+    std::vector<std::string> errors;
+
+    if (scfSettings.optionsSet[MAX_ITER] && scfSettings.scfOptions.maxIter == 0)
+        errors.emplace_back("MAX_ITER in $scf block must be greater than 0.");
+
+    if (scfSettings.optionsSet[ENERGY_TOL] && scfSettings.scfOptions.energyTol < 0)
+        errors.emplace_back("ENERGY_TOL in $scf block must be non-negative.");
+
+    if (scfSettings.optionsSet[DENSITY_TOL] && scfSettings.scfOptions.densityTol < 0)
+        errors.emplace_back("DENSITY_TOL in $scf block must be non-negative.");
+
+    if (scfSettings.optionsSet[DIIS_MAX_SIZE] && scfSettings.scfOptions.DIISmaxSize < 1)
+        errors.emplace_back("DIIS_SIZE in $scf block must be greater than 0.");
+
+    if (scfSettings.optionsSet[DIIS_ERROR_TOL] && scfSettings.scfOptions.DIISErrorTol < 0)
+        errors.emplace_back("DIIS_TOL in $scf block must be non-negative.");
+
+    if (scfSettings.optionsSet[SCHWARTZ_THRESH] && scfSettings.scfOptions.schwartzThreshold < 0)
+        errors.emplace_back("SCHWARTZ_THRESH in $scf block must be non-negative.");
+
+    if (scfSettings.optionsSet[DENSITY_THRESH] && scfSettings.scfOptions.densityThreshold < 0)
+        errors.emplace_back("DENSITY_THRESH in $scf block must be non-negative.");
+
+    if (scfSettings.optionsSet[SYMMETRY_TOL] && scfSettings.scfOptions.symmetryTolerance < 0)
+        errors.emplace_back("SYMMETRY_TOL in $scf block must be non-negative.");
+
+    if (scfSettings.optionsSet[DAMP] && (scfSettings.scfOptions.damp < 0 || scfSettings.scfOptions.damp > 100))
+        errors.emplace_back("DAMP in $scf block must be between 0 and 100.");
+
+    if (scfSettings.optionsSet[MAX_DAMP_CYCLES] && scfSettings.scfOptions.maxDampIter <= 0)
+        errors.emplace_back("MAX_DAMP_CYCLES in $scf block must be a positive integer.");
+
+    if (scfSettings.optionsSet[STOP_DAMP_THRESH] && scfSettings.scfOptions.stopDampThresh < 0)
+        errors.emplace_back("STOP_DAMP_THRESH in $scf block must be non-negative.");
+
+    size_t electronCount = std::accumulate(
+        moleculeSettings.geometry.begin(),
+        moleculeSettings.geometry.end(),
+        -moleculeSettings.charge,
+        [](size_t acc, const Atom& atom) { return acc + atom.atomicNumber; }
+    );
+
+    bool unrestricted = scfSettings.scfOptions.unrestricted;
+    if (!scfSettings.optionsSet[UNRESTRICTED])
+    {
+        unrestricted = (moleculeSettings.multiplicity != 1);
+    }
+
+    if (scfSettings.optionsSet[UNRESTRICTED])
+    {
+        if (!scfSettings.scfOptions.unrestricted && moleculeSettings.multiplicity != 1)
+            errors.emplace_back(
+                "Multiplicity set to " + std::to_string(moleculeSettings.multiplicity)
+                + " but the SCF method is restricted (RHF). Set multiplicity to 1 or use unrestricted (UHF) method."
+            );
+    }
+
+    if (scfSettings.scfOptions.guessMix > 0 && !unrestricted)
+        errors.emplace_back("The guess_mix option can only be used with unrestricted calculations.");
+
+    if (electronCount + 1 < moleculeSettings.multiplicity || (electronCount - moleculeSettings.multiplicity) % 2 == 0)
+        errors.emplace_back("Invalid combination of charge and multiplicity.");
+
+    // --- Warnings ---
+    if (scfSettings.optionsSet[DIIS_MAX_SIZE] && !scfSettings.scfOptions.useDIIS)
+        warnings.emplace_back("DIIS_SIZE is set, but it will have no effect because diis is disabled.");
+    if (scfSettings.optionsSet[DIIS_ERROR_TOL] && !scfSettings.scfOptions.useDIIS)
+        warnings.emplace_back("DIIS_TOL is set, but it will have no effect because diis is disabled.");
+    if (scfSettings.optionsSet[MAX_DAMP_CYCLES] && scfSettings.scfOptions.damp == 0)
+        warnings.emplace_back("MAX_DAMP_CYCLES is set, but it will have no effect because damp is 0.");
+    if (scfSettings.optionsSet[STOP_DAMP_THRESH] && scfSettings.scfOptions.damp == 0)
+        warnings.emplace_back("STOP_DAMP_THRESH is set, but it will have no effect because damp is 0.");
+    if (scfSettings.optionsSet[DENSITY_THRESH] && !scfSettings.scfOptions.direct)
+        warnings.emplace_back("DENSITY_THRESH is set, but it will have no effect because direct SCF is not enabled.");
+
+    std::string lowercaseName = basisSettings.basisName;
+    std::transform(
+        lowercaseName.begin(),
+        lowercaseName.end(),
+        lowercaseName.begin(),
+        [](unsigned char c) { return std::tolower(c); }
+    );
+    std::string basisPath = "basis_sets/" + lowercaseName + ".json";
+    if (!std::filesystem::exists(basisPath))
+    {
+        throw std::runtime_error("Basis set '" + basisSettings.basisName + "' not found.");
+    }
+
+    if (!errors.empty())
+    {
+        std::string errorMessage = "INPUT ERROR:\n";
+        for (const auto& error : errors) { errorMessage += "- " + error + "\n"; }
+        throw std::runtime_error(errorMessage);
+    }
+}
+
+Input::SCFInputSettings Input::parseSCFBlock(const std::string& SCFBlock)
 {
 
     auto toLowerString = [](const std::string& str)
@@ -185,189 +308,154 @@ SCFOptions Input::readSCFBlock(const std::string& SCFBlock)
         return lowerStr;
     };
 
+    Input::SCFInputSettings settings;
+
     std::istringstream SCFStream(SCFBlock);
-    SCFOptions options;
     std::string token;
     while (SCFStream >> token)
     {
         std::string tokenLwr = toLowerString(token);
         if (tokenLwr == "max_iter")
         {
-            SCFStream >> options.maxIter;
-            if (options.maxIter == 0)
-                throw std::runtime_error(token + " in $scf block must be greater than 0.");
+            SCFStream >> settings.scfOptions.maxIter;
+            settings.optionsSet[MAX_ITER] = true;
         }
         else if (tokenLwr == "energy_tol")
         {
-            SCFStream >> options.energyTol;
-            if (options.energyTol < 0)
-                throw std::runtime_error(
-                    "Invalid value for " + token + " in $scf block: " + std::to_string(options.energyTol)
-                    + ". Must be non-negative."
-                );
+            SCFStream >> settings.scfOptions.energyTol;
+            settings.optionsSet[ENERGY_TOL] = true;
         }
         else if (tokenLwr == "density_tol")
         {
-            SCFStream >> options.densityTol;
-            if (options.densityTol < 0)
-                throw std::runtime_error(
-                    "Invalid value for " + token + " in $scf block: " + std::to_string(options.densityTol)
-                    + ". Must be non-negative."
-                );
+            SCFStream >> settings.scfOptions.densityTol;
+            settings.optionsSet[DENSITY_TOL] = true;
         }
         else if (tokenLwr == "diis")
         {
             std::string boolStr;
             SCFStream >> boolStr;
             if (toLowerString(boolStr) == "true" || boolStr == "1")
-                options.useDIIS = true;
+                settings.scfOptions.useDIIS = true;
             else if (toLowerString(boolStr) == "false" || boolStr == "0")
-                options.useDIIS = false;
+                settings.scfOptions.useDIIS = false;
             else
                 throw std::runtime_error("Invalid boolean value for " + token + " in $scf block: " + boolStr);
+            settings.optionsSet[DIIS] = true;
         }
         else if (tokenLwr == "diis_size")
         {
-            SCFStream >> options.DIISmaxSize;
-            if (options.DIISmaxSize < 1)
-                throw std::runtime_error(token + " in $scf block must be greater than 0.");
-        }
-        else if (tokenLwr == "diis_start")
-        {
-            SCFStream >> options.DIISstart;
-            if (options.DIISstart < 1)
-                throw std::runtime_error(token + " in $scf block must be greater than 0.");
+            SCFStream >> settings.scfOptions.DIISmaxSize;
+            settings.optionsSet[DIIS_MAX_SIZE] = true;
         }
         else if (tokenLwr == "diis_tol")
         {
-            SCFStream >> options.DIISErrorTol;
-            if (options.DIISErrorTol < 0)
-                throw std::runtime_error(
-                    "Invalid value for " + token + " in $scf block: " + std::to_string(options.DIISErrorTol)
-                    + ". Must be non-negative."
-                );
+            SCFStream >> settings.scfOptions.DIISErrorTol;
+            settings.optionsSet[DIIS_ERROR_TOL] = true;
         }
         else if (tokenLwr == "direct")
         {
             std::string boolStr;
             SCFStream >> boolStr;
             if (toLowerString(boolStr) == "true" || boolStr == "1")
-                options.direct = true;
+                settings.scfOptions.direct = true;
             else if (toLowerString(boolStr) == "false" || boolStr == "0")
-                options.direct = false;
+                settings.scfOptions.direct = false;
             else
                 throw std::runtime_error("Invalid boolean value for " + token + " in $scf block: " + boolStr);
+            settings.optionsSet[DIRECT] = true;
         }
         else if (tokenLwr == "schwartz_thresh")
         {
-            SCFStream >> options.schwartzThreshold;
-            if (options.schwartzThreshold < 0)
-                throw std::runtime_error(
-                    "Invalid value for " + token + " in $scf block: " + std::to_string(options.schwartzThreshold)
-                    + ". Must be non-negative."
-                );
+            SCFStream >> settings.scfOptions.schwartzThreshold;
+            settings.optionsSet[SCHWARTZ_THRESH] = true;
         }
         else if (tokenLwr == "density_thresh")
         {
-            SCFStream >> options.densityThreshold;
-            if (options.densityThreshold < 0)
-                throw std::runtime_error(
-                    "Invalid value for " + token + " in $scf block: " + std::to_string(options.densityThreshold)
-                    + ". Must be non-negative."
-                );
+            SCFStream >> settings.scfOptions.densityThreshold;
+            settings.optionsSet[DENSITY_THRESH] = true;
         }
         else if (tokenLwr == "symmetry")
         {
             std::string boolStr;
             SCFStream >> boolStr;
             if (toLowerString(boolStr) == "true" || boolStr == "1")
-                options.useSymmetry = true;
+                settings.scfOptions.useSymmetry = true;
             else if (toLowerString(boolStr) == "false" || boolStr == "0")
-                options.useSymmetry = false;
+                settings.scfOptions.useSymmetry = false;
             else
                 throw std::runtime_error("Invalid boolean value for " + token + " in $scf block: " + boolStr);
+            settings.optionsSet[SYMMETRY] = true;
         }
         else if (tokenLwr == "print_full_mos")
         {
             std::string boolStr;
             SCFStream >> boolStr;
             if (toLowerString(boolStr) == "true" || boolStr == "1")
-                options.printFullMOs = true;
+                settings.scfOptions.printFullMOs = true;
             else if (toLowerString(boolStr) == "false" || boolStr == "0")
-                options.printFullMOs = false;
+                settings.scfOptions.printFullMOs = false;
             else
                 throw std::runtime_error("Invalid boolean value for " + token + " in $scf block: " + boolStr);
+            settings.optionsSet[PRINT_FULL_MOS] = true;
         }
         else if (tokenLwr == "symmetry_tol")
         {
-            SCFStream >> options.symmetryTolerance;
-            if (options.symmetryTolerance < 0)
-                throw std::runtime_error(
-                    "Invalid value for " + token + " in $scf block: " + std::to_string(options.symmetryTolerance)
-                    + ". Must be non-negative."
-                );
+            SCFStream >> settings.scfOptions.symmetryTolerance;
+            settings.optionsSet[SYMMETRY_TOL] = true;
         }
         else if (tokenLwr == "unrestricted")
         {
             std::string boolStr;
             SCFStream >> boolStr;
             if (toLowerString(boolStr) == "true" || boolStr == "1")
-                options.unrestricted = true;
+                settings.scfOptions.unrestricted = true;
             else if (toLowerString(boolStr) == "false" || boolStr == "0")
-                options.unrestricted = false;
+                settings.scfOptions.unrestricted = false;
             else
                 throw std::runtime_error("Invalid boolean value for " + token + " in $scf block: " + boolStr);
+            settings.optionsSet[UNRESTRICTED] = true;
         }
         else if (tokenLwr == "guess_mix")
         {
             std::string mixStr;
             SCFStream >> mixStr;
             if (toLowerString(mixStr) == "true")
-                options.guessMix = 1;
+                settings.scfOptions.guessMix = 1;
             else if (toLowerString(mixStr) == "false")
-                options.guessMix = 0;
+                settings.scfOptions.guessMix = 0;
             else if (std::all_of(mixStr.begin(), mixStr.end(), ::isdigit))
             {
                 int mixVal = std::stoi(mixStr);
                 if (mixVal < 0 || mixVal > 10)
                     throw std::runtime_error(
                         "Invalid integer value for " + token + " in $scf block: \"" + mixStr
-                        + "\". Must be between 0 and 10."
+                        + ". Must be between 0 and 10."
                     );
-                options.guessMix = mixVal;
+                settings.scfOptions.guessMix = mixVal;
             }
             else
+            {
                 throw std::runtime_error(
                     "Invalid value for " + token + " in $scf block: \"" + mixStr
-                    + "\". Must be an integer between 0 and 10"
+                    + ". Must be an integer between 0 and 10"
                 );
+            }
+            settings.optionsSet[GUESS_MIX] = true;
         }
         else if (tokenLwr == "damp")
         {
-            SCFStream >> options.damp;
-            if (options.damp < 0 || options.damp > 100)
-                throw std::runtime_error(
-                    "Invalid integer value for " + token + " in $scf block: " + std::to_string(options.damp)
-                    + ". Must be between 0 and 100."
-                );
+            SCFStream >> settings.scfOptions.damp;
+            settings.optionsSet[DAMP] = true;
         }
         else if (tokenLwr == "max_damp_cycles")
         {
-            SCFStream >> options.maxDampIter;
-            if (options.maxDampIter <= 0)
-                throw std::runtime_error(
-                    "Invalid value for " + token + " in $scf block: " + std::to_string(options.maxDampIter)
-                    + ". Must be positive integer."
-                );
+            SCFStream >> settings.scfOptions.maxDampIter;
+            settings.optionsSet[MAX_DAMP_CYCLES] = true;
         }
         else if (tokenLwr == "stop_damp_thresh")
         {
-            SCFStream >> options.stopDampThresh;
-            if (options.stopDampThresh < 0)
-                throw std::runtime_error(
-                    "Invalid value for " + token + " in $scf block: " + std::to_string(options.stopDampThresh)
-                    + ". Must be non-negative."
-                );
+            SCFStream >> settings.scfOptions.stopDampThresh;
+            settings.optionsSet[STOP_DAMP_THRESH] = true;
         }
         else
         {
@@ -380,10 +468,6 @@ SCFOptions Input::readSCFBlock(const std::string& SCFBlock)
         }
     }
 
-    // Make some basic checks on the options.
-    if (options.guessMix > 0 && !options.unrestricted)
-        throw std::runtime_error("The guess_mix option can only be used with unrestricted calculations.");
 
-
-    return options;
+    return settings;
 }

@@ -5,6 +5,7 @@
 
 #include <fstream>
 #include <iostream>
+#include <vector>
 
 int main(int argc, char* argv[])
 {
@@ -41,11 +42,21 @@ int main(int argc, char* argv[])
 
         // Run the SCF procedure.
         std::pair<Molecule, SCFOptions> inputData = input.read();
+
+        // Write any warnings to the output file.
+        const std::vector<std::string>& warnings = input.getWarnings();
+        if (!warnings.empty())
+        {
+            for (const auto& warning : warnings) { output->write("WARNING: " + warning + "\n"); }
+            output->write("\n");
+        }
+
         SCF scf(inputData.first, inputData.second, output);
         scf.run();
     }
     catch (const std::exception& e)
     {
+        // Write any errors to the output file, and print them to the console.
         std::cerr << "Error: " << e.what() << std::endl;
         output->write("Error: " + std::string(e.what()) + "\n");
         return 1;

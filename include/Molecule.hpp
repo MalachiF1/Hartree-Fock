@@ -191,7 +191,7 @@ class Molecule
     const std::vector<AtomicOrbital>& getAtomicOrbitals() const { return atomicOrbitals; }
     size_t getBasisFunctionCount() const { return basisFunctionCount; }
     int getCharge() const { return charge; }
-    int getMultiplicity() const { return multiplicity; }
+    size_t getMultiplicity() const { return multiplicity; }
     double getSymmetryTol() const { return symmetryTolerance; }
     size_t getElectronCount() const { return electronCount; }
     const std::vector<Atom>& getGeometry() const { return geometry; }

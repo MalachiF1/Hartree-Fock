@@ -5,7 +5,6 @@
 
 #include <Eigen/Dense>
 
-
 struct SCFOptions
 {
     size_t maxIter           = 30;
@@ -13,7 +12,6 @@ struct SCFOptions
     double densityTol        = 1.0e-6;
     bool useDIIS             = true;
     size_t DIISmaxSize       = 6;
-    unsigned DIISstart       = 1;
     double DIISErrorTol      = 1.0e-6;
     bool direct              = false;
     double schwartzThreshold = 1.0e-10;
