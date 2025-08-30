@@ -5,7 +5,7 @@
 
 #include <cmath>
 #include <cstdlib>
-#include <iomanip>
+#include <fmt/core.h>
 #include <ios>
 #include <iostream>
 
@@ -25,16 +25,6 @@ void SCF::run()
     if (this->options.useDIIS) // Initialize the DIIS handler with the specified maximum size.
         diis_handler = std::make_unique<DIIS>(this->options.DIISmaxSize);
 
-    auto center = [](const std::string& s, size_t width) -> std::string
-    {
-        if (s.length() >= width)
-            return s;
-        size_t totalPadding = width - s.length();
-        size_t paddingLeft  = totalPadding / 2;
-        size_t paddingRight = totalPadding - paddingLeft;
-        return std::string(paddingLeft, ' ') + s + std::string(paddingRight, ' ');
-    };
-
     // Print header for the iteration table.
     size_t width = 45;
     if (this->options.useDIIS)
@@ -44,15 +34,11 @@ void SCF::run()
     if (this->options.levelShift > 0)
         width += 15;
     std::stringstream ss;
-    ss << "\n";
-    for (size_t i = 0; i < width; ++i) ss << "-";
-    ss << "\n";
-    ss << center("Iteration", 15) << center("ΔE", 15) << center("ΔD", 18);
+    ss << fmt::format("\n{:-<{}}\n", "", width);
+    ss << fmt::format("{:^15}{:^15}{:^15}", "Iteration", "ΔE", "ΔD");
     if (this->options.useDIIS)
-        ss << center("DIIS Error", 12);
-    ss << "\n";
-    for (size_t i = 0; i < width; ++i) ss << "-";
-    ss << "\n";
+        ss << fmt::format("{:^15}", "DIIS Error");
+    ss << fmt::format("\n{:-<{}}\n", "", width);
     this->output->write(ss.str());
 
     // SCF cycles
@@ -166,8 +152,7 @@ void SCF::initialize(double schwartzThreshold, bool direct)
     // Calculate two-electron integrals (only if not using direct method).
     if (!direct)
         this->Vee = molecule->electronRepulsionTensor(schwartzThreshold);
-    else
-        // If using direct method, only pre-calculate the Schwartz screening matrix.
+    else // If using direct method, only pre-calculate the Schwartz screening matrix.
         this->Q = molecule->schwartzScreeningMatrix();
 
     this->output->write(printJobSpec());
@@ -453,7 +438,7 @@ void SCF::buildFockMatrix(double schwartzThreshold, double densityThreshold)
         }
 #pragma omp critical
         {
-            // Accumulate the thread-local G matrix into the global G matrix.
+            // Accumulate the thread-local matrices into the global ones.
             J += J_p;
             K_alpha += K_alpha_p;
             if (this->options.unrestricted)
@@ -573,47 +558,14 @@ void SCF::printIteration() const
 {
     std::stringstream ss;
 
-    auto centerDouble = [](const double val, size_t width) -> std::string
-    {
-        std::ostringstream oss;
-        oss << std::scientific << std::setprecision(5) << val;
-        std::string s = oss.str();
-        if (s.length() >= width)
-            return s;
-        size_t totalPadding = width - s.length();
-        size_t paddingLeft  = totalPadding / 2;
-        size_t paddingRight = totalPadding - paddingLeft;
-        return std::string(paddingLeft, ' ') + s + std::string(paddingRight, ' ');
-    };
-
-    auto centerStr = [](const std::string s, size_t width) -> std::string
-    {
-        if (s.length() >= width)
-            return s;
-        size_t totalPadding = width - s.length();
-        size_t paddingLeft  = totalPadding / 2;
-        size_t paddingRight = totalPadding - paddingLeft;
-        return std::string(paddingLeft, ' ') + s + std::string(paddingRight, ' ');
-    };
-
-    ss << centerStr(std::to_string(this->iteration + 1), 15) << centerDouble(this->deltaE, 15)
-       << centerDouble(this->deltaD, 15);
+    ss << fmt::format("{:^15}{:^15.5e}{:^15.5e}", this->iteration + 1, this->deltaE, this->deltaD);
     if (this->options.useDIIS)
-        ss << centerDouble(this->DIISError, 15);
-
+        ss << fmt::format("{:^15.5e}", this->DIISError);
     if (this->dampCoeff > 0)
-    {
-        std::stringstream dampSS;
-        dampSS << "damp: " << std::fixed << std::setprecision(2) << static_cast<double>(this->options.damp) / 100;
-        ss << centerStr(dampSS.str(), 15);
-    }
+        ss << fmt::format("{:^15}", fmt::format("damp: {:.2f}", static_cast<double>(this->options.damp) / 100));
     if (this->useLevelShiftingAlpha || this->useLevelShiftingBeta)
-    {
-        std::stringstream lshiftSS;
-        lshiftSS << "lshift: " << std::fixed << std::setprecision(4) << this->options.levelShift;
-        ss << centerStr(lshiftSS.str(), 15);
-    }
-    ss << std::endl;
+        ss << fmt::format("{:^15}", fmt::format("lshift: {:.4f}", this->options.levelShift));
+    ss << "\n";
 
     this->output->write(ss.str());
 }
@@ -629,42 +581,36 @@ void SCF::printFinalResults(bool converged) const
         ss << "\nWarning: Maximum iterations reached. SCF did not converge!\n";
 
     double totalEnergy = this->electronicEnergy + this->nuclearEnergy;
-    ss << "\n--- SCF Results ---\n";
-    ss << std::fixed << std::setprecision(10);
-    if (this->options.unrestricted)
-        ss << "<S^2>: " << computeSpinSquared() << "\n";
-    ss << "Electronic Energy: " << this->electronicEnergy << "\n";
-    ss << "Nuclear Repulsion: " << this->nuclearEnergy << "\n";
-    ss << "Total SCF Energy: " << totalEnergy << "\n";
+    ss << fmt::format(
+        "\n--- SCF Results ---\n"
+        "{0}"
+        "Electronic Energy: {1:>15.10f}\n"
+        "Nuclear Repulsion: {2:>15.10f}\n"
+        "Total SCF Energy:  {3:>15.10f}\n",
+        this->options.unrestricted ? fmt::format("<S^2>: {:>15.10f}\n", computeSpinSquared()) : "",
+        this->electronicEnergy,
+        this->nuclearEnergy,
+        totalEnergy
+    );
 
     std::vector<std::string> aoLabels = this->molecule->getAOLabels();
 
-    ss << "\n";
-    for (size_t i = 0; i < 99; ++i) { ss << "-"; }
-    ss << "\n";
-    std::string title      = this->options.unrestricted ? "Alpha Orbital Energies (a.u.)" : "Orbital Energies (a.u.)";
-    size_t whitespaceWidth = (99 - title.length()) / 2;
-    ss << std::string(whitespaceWidth, ' ') << title << std::string(whitespaceWidth, ' ') << "\n";
-    for (size_t i = 0; i < 99; ++i) { ss << "-"; }
-    ss << "\n";
+    ss << fmt::format("\n{:-<{}}\n", "", 99);
+    std::string title = this->options.unrestricted ? "Alpha Orbital Energies (a.u.)" : "Orbital Energies (a.u.)";
+    ss << fmt::format("{:^99}\n", title);
+    ss << fmt::format("{:-<{}}\n", "", 99);
 
     ss << "-- Occupied --\n";
     ss << printShortMOs(this->eigenvalues_alpha.head(this->occupiedCountAlpha), 5, 7);
     ss << "-- Virtual --\n";
     ss << printShortMOs(this->eigenvalues_alpha.tail(this->basisCount - this->occupiedCountAlpha), 5, 7);
-    for (size_t i = 0; i < 99; ++i) { ss << "-"; }
-    ss << "\n";
+    ss << fmt::format("{:-<{}}\n", "", 99);
 
     if (this->options.unrestricted)
     {
-        ss << "\n";
-        for (size_t i = 0; i < 99; ++i) { ss << "-"; }
-        ss << "\n";
-        whitespaceWidth = (99 - std::string("Beta Orbitaa Energies (a.u.)").length()) / 2;
-        ss << std::string(whitespaceWidth, ' ') << "Beta Orbital Energies (a.u.)" << std::string(whitespaceWidth, ' ')
-           << "\n";
-        for (size_t i = 0; i < 99; ++i) { ss << "-"; }
-        ss << "\n";
+        ss << fmt::format("\n{:-<{}}\n", "", 99);
+        ss << fmt::format("{:^99}\n", "Beta Orbital Energies (a.u.)");
+        ss << fmt::format("{:-<{}}\n", "", 99);
 
         ss << "-- Occupied --\n";
         ss << printShortMOs(this->eigenvalues_beta.head(this->occupiedCountBeta), 5, 7);
@@ -676,15 +622,11 @@ void SCF::printFinalResults(bool converged) const
 
     if (this->options.printFullMOs)
     {
-        ss << "\n";
-        for (size_t i = 0; i < 99; ++i) { ss << "-"; }
-        ss << "\n";
+        ss << fmt::format("\n{:-<{}}\n", "", 99);
         std::string title = this->options.unrestricted ? "Alpha Molecular Orbital Coefficients"
                                                        : "Molecular Orbital Coefficients";
-        whitespaceWidth   = (99 - title.length()) / 2;
-        ss << std::string(whitespaceWidth, ' ') << title << std::string(whitespaceWidth, ' ') << "\n";
-        for (size_t i = 0; i < 99; ++i) { ss << "-"; }
-        ss << "\n";
+        ss << fmt::format("{:^99}\n", title);
+        ss << fmt::format("{:-<{}}\n", "", 99);
 
         ss << "\nOccupied orbitals:\n";
         ss << "‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾\n";
@@ -705,19 +647,13 @@ void SCF::printFinalResults(bool converged) const
             5,
             5
         );
-        for (size_t i = 0; i < 99; ++i) { ss << "-"; }
-        ss << "\n";
+        ss << fmt::format("{:-<{}}\n", "", 99);
 
         if (this->options.unrestricted)
         {
-            ss << "\n";
-            for (size_t i = 0; i < 99; ++i) { ss << "-"; }
-            ss << "\n";
-            whitespaceWidth = (99 - std::string("Beta Molecular Orbital Coefficients").length()) / 2;
-            ss << std::string(whitespaceWidth, ' ') << "Beta Molecular Orbital Coefficients"
-               << std::string(whitespaceWidth, ' ') << "\n";
-            for (size_t i = 0; i < 99; ++i) { ss << "-"; }
-            ss << "\n";
+            ss << fmt::format("\n{:-<{}}\n", "", 99);
+            ss << fmt::format("{:^99}\n", "Beta Molecular Orbital Coefficients");
+            ss << fmt::format("{:-<{}}\n", "", 99);
 
             ss << "\nOccupied orbitals:\n";
             ss << "‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾\n";
@@ -738,7 +674,7 @@ void SCF::printFinalResults(bool converged) const
                 5,
                 5
             );
-            for (size_t i = 0; i < 99; ++i) { ss << "-"; }
+            ss << fmt::format("{:-<{}}\n", "", 99);
         }
     }
 
@@ -750,18 +686,7 @@ std::string SCF::printShortMOs(const Eigen::VectorXd& eigenvalues, size_t precis
     const int width = 6 + precision;
 
     auto format = [&precision, &width](double num) -> std::string
-    {
-        std::stringstream ss;
-
-        if (std::signbit(num))
-            ss << "-";
-        else
-            ss << " ";
-
-        ss << std::scientific << std::left << std::setw(width - 1) << std::setprecision(precision) << std::abs(num);
-
-        return ss.str();
-    };
+    { return fmt::format("{}{:<{}.{}e} ", std::signbit(num) ? "-" : " ", std::abs(num), width - 1, precision); };
 
     std::stringstream ss;
     ss << std::left;
@@ -773,7 +698,7 @@ std::string SCF::printShortMOs(const Eigen::VectorXd& eigenvalues, size_t precis
         size_t numMOs     = eigenvalues.size();
         size_t endIndex   = std::min(startIndex + MOsPerRow, numMOs);
 
-        for (size_t i = startIndex; i < endIndex; ++i) { ss << format(eigenvalues(i)) << std::setw(2) << " "; }
+        for (size_t i = startIndex; i < endIndex; ++i) { ss << format(eigenvalues(i)); }
         ss << "\n";
     }
 
@@ -791,18 +716,7 @@ std::string SCF::printFullMOs(
     const int width = 10 + precision;
 
     auto format = [&precision, &width](double num) -> std::string
-    {
-        std::stringstream ss;
-
-        if (std::signbit(num))
-            ss << "-";
-        else
-            ss << " ";
-
-        ss << std::scientific << std::left << std::setw(width - 1) << std::setprecision(precision) << std::abs(num);
-
-        return ss.str();
-    };
+    { return fmt::format("{}{:<{}.{}e}", std::signbit(num) ? "-" : " ", std::abs(num), width - 1, precision); };
 
     std::stringstream ss;
     ss << std::left;
@@ -813,23 +727,17 @@ std::string SCF::printFullMOs(
         size_t startIndex = k * MOsPerRow;
         size_t numMOs     = MOs.cols();
         size_t endIndex   = std::min(startIndex + MOsPerRow, numMOs);
-        ss << std::setw(width) << " " << "\t";
-        for (size_t i = startIndex; i < endIndex; ++i)
-        {
-            double whitespaceWidth = precision + 8;
-            ss << std::string(std::floor((whitespaceWidth - 1) / 2), ' ');
-            ss << i + 1;
-            ss << std::string(std::ceil((whitespaceWidth - 1) / 2), ' ') << "\t";
-        }
+        ss << fmt::format("{:<{}}\t", " ", width);
+        for (size_t i = startIndex; i < endIndex; ++i) { ss << fmt::format("{:^{}}\t", i + 1, width - 1, 0); }
         ss << "\n";
 
-        ss << std::setw(width) << "eigenvalues:" << "\t";
+        ss << fmt::format("{:<{}}\t", "eigenvalues:", width);
         for (size_t i = startIndex; i < endIndex; ++i) { ss << format(eigenvalues(i)) << "\t"; }
         ss << "\n";
 
         for (size_t i = 0; i < this->basisCount; ++i)
         {
-            ss << std::setw(width) << aoLabels[i] << "\t";
+            ss << fmt::format("{:<{}}\t", aoLabels[i], width);
             for (size_t j = startIndex; j < endIndex; ++j) { ss << format(MOs(i, j)) << "\t"; }
             ss << "\n";
         }
@@ -841,85 +749,80 @@ std::string SCF::printFullMOs(
 
 std::string SCF::printJobSpec() const
 {
-
     std::stringstream ss;
-    ss << std::left;
-    ss << "Starting " << (this->options.unrestricted ? "UHF" : "RHF") << " calculation.\n\n";
 
-    ss << "Maximum iterations: " << std::fixed << this->options.maxIter << "\n";
-    ss << "Energy convergence threshold: " << std::scientific << this->options.energyTol << "\n";
-    ss << "Density convergence threshold: " << std::scientific << this->options.densityTol << "\n";
-    ss << "Schwartz screening threshold: " << std::scientific << this->options.schwartzThreshold << "\n";
-    ss << std::endl;
+    ss << fmt::format(
+        "Starting {} calculation.\n\n"
+        "Maximum Iterations: {}.\n"
+        "Energy Convergence Threshold: {:.6e}.\n"
+        "Density Convergence Threshold: {:.6e}.\n"
+        "Schwartz Screening Threshold: {:.6e}.\n\n",
+        this->options.unrestricted ? "UHF" : "RHF",
+        this->options.maxIter,
+        this->options.energyTol,
+        this->options.densityTol,
+        this->options.schwartzThreshold
+    );
 
     if (this->options.direct)
     {
-        ss << "Using direct SCF.\n";
-        ss << "Density screening threshold: " << std::scientific << this->options.densityThreshold << "\n";
-        ss << std::endl;
+        ss << fmt::format("Direct SCF enabled.\nDensity screening threshold: {:.6e}.\n\n", this->options.densityThreshold);
     }
     if (this->options.useDIIS)
     {
-        ss << "DIIS enabled.\nSize of DIIS history: " << std::fixed << this->options.DIISmaxSize
-           << "\nDIIS error threshold: " << std::scientific << this->options.DIISErrorTol << "\n";
-        ss << std::endl;
+        ss << fmt::format(
+            "DIIS enabled.\nSize of DIIS history: {}\nDIIS error threshold: {:.6e}.\n\n",
+            this->options.DIISmaxSize,
+            this->options.DIISErrorTol
+        );
     }
     if (this->options.guessMix > 0)
     {
-        ss << "Requested " << this->options.guessMix * 10 << "% mixing of HOMO and LUMO orbitals in initial guess.\n";
-        ss << std::endl;
+        ss << fmt::format("Requested {}% mixing of HOMO and LUMO orbitals in initial guess.\n\n", this->options.guessMix * 10);
     }
     if (this->options.damp > 0)
     {
-        ss << "Damping enbaled. Mixing coefficient set to: " << std::fixed << std::setprecision(2)
-           << static_cast<double>(this->options.damp) / 100 << "\n";
+        ss << fmt::format("Damping enabled. Mixing coefficient set to: {:.2f}.\n", static_cast<double>(this->options.damp) / 100);
         if (this->options.maxDampIter < this->options.maxIter)
-            ss << "Damping will stop after iteration " << this->options.maxDampIter << "\n";
+            ss << fmt::format("Damping will stop after iteration {}.\n", this->options.maxDampIter);
         if (this->options.stopDampThresh != 0)
-            ss << "Damping will stop once ΔE < " << std::scientific << std::setprecision(6)
-               << this->options.stopDampThresh << "\n";
+            ss << fmt::format("Damping will stop once ΔE < {:.6e}.\n", this->options.stopDampThresh);
         ss << std::endl;
     }
     if (options.levelShift > 0)
     {
-        ss << "Level-shifting enabled. Level-shift set to: " << std::fixed << std::setprecision(4)
-           << this->options.levelShift << "\n";
+        ss << fmt::format("Level-shifting enabled. Level-shift set to {:.4f}", this->options.levelShift);
         if (this->options.maxLshiftIter < this->options.maxLshiftIter)
-            ss << "Level-shifting will stop after iteration " << this->options.maxLshiftIter << "\n";
+            ss << fmt::format("Level-shifting will stop after iteration {}.\n", this->options.maxLshiftIter);
         if (this->options.stopLshiftThresh > 0)
-            ss << "Level-shifting will stop once ΔE < " << std::scientific << std::setprecision(6)
-               << this->options.stopLshiftThresh << "\n";
+            ss << fmt::format("Level-shifting will stop once ΔE < {:.6e}.\n", this->options.stopLshiftThresh);
         if (!std::isinf(this->options.lshiftGapTol))
-            ss << "Level-shifting will be applied when the HOMO-LUMO gap is less than " << std::fixed
-               << std::setprecision(6) << this->options.lshiftGapTol << "\n";
+            ss << fmt::format("Level-shifting will be applied when HOMO-LUMO gap is less than {:.4f}.\n", this->options.lshiftGapTol);
         ss << std::endl;
     }
 
-    ss << "Molecule with " << this->occupiedCountAlpha << " alpha and " << this->occupiedCountBeta << " beta electrons.\n";
-    ss << "Number of basis functions: " << this->basisCount << "\n";
-    ss << "Geometry:\n";
-
-    auto format = [](double num) -> std::string
-    {
-        std::stringstream ss;
-
-        if (std::signbit(num))
-            ss << "-";
-        else
-            ss << " ";
-
-        ss << std::left << std::fixed << std::setprecision(8) << std::abs(num);
-
-        return ss.str();
-    };
+    ss << fmt::format(
+        "Molecule with {} alpha and {} beta electrons.\n"
+        "Number of basis functions: {}.\n"
+        "Geometry:\n",
+        this->occupiedCountAlpha,
+        this->occupiedCountBeta,
+        this->basisCount
+    );
 
     for (const auto& atom : this->molecule->getGeometry())
     {
-        ss << "\t" << Utils::atomicNumberToName.at(atom.atomicNumber) << "\t" << format(atom.coords.x()) << "\t"
-           << format(atom.coords.y()) << "\t" << format(atom.coords.z()) << "\n";
+        ss << fmt::format(
+            "\t{: <2} {: >3} {: >13.8f} {: >13.8f} {: >13.8f}\n",
+            Utils::atomicNumberToName.at(atom.atomicNumber),
+            atom.atomicNumber,
+            atom.coords.x(),
+            atom.coords.y(),
+            atom.coords.z()
+        );
     }
     if (this->options.useSymmetry)
-        ss << "Point Group: " << this->molecule->getPointGroup().toString() << "\n";
+        ss << fmt::format("Point Group: {}.\n", this->molecule->getPointGroup().toString());
 
     return ss.str();
 }

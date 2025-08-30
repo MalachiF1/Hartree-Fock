@@ -9,7 +9,6 @@
 #include <algorithm>
 #include <cmath>
 #include <functional>
-#include <iomanip>
 #include <iostream>
 #include <map>
 #include <numeric>
@@ -73,7 +72,7 @@ bool isRegularPolygon(const std::vector<Vec3>& points, const Vec3& center, const
     }
 
     // sort the angles
-    std::sort(angles.begin(), angles.end());
+    std::ranges::sort(angles);
 
     // check the angles are equally spaced
     double diff = angles[1] - angles[0];
@@ -269,9 +268,8 @@ void alignCanonically(
         {principalMoments[1], principalAxes.col(1)},
         {principalMoments[2], principalAxes.col(2)}
     };
-    std::sort(
-        momentAxisPairs.begin(),
-        momentAxisPairs.end(),
+    std::ranges::sort(
+        momentAxisPairs,
         [](const std::pair<double, Vec3>& a, const std::pair<double, Vec3>& b) { return a.first < b.first; }
     );
 
@@ -284,10 +282,8 @@ void alignCanonically(
     if (areEqual(sortedMoments[0], 0, tol) && areEqual(sortedMoments[1], sortedMoments[2], tol))
     {
         // rotate the geometry to align the molecule with the z-axis
-        auto atom = std::find_if(
-            geometry.begin(),
-            geometry.end(),
-            [&tol](const Atom& atom) { return !areEqual(atom.coords, Vec3(0, 0, 0), tol); }
+        auto atom = std::ranges::find_if(
+            geometry, [&tol](const Atom& atom) { return !areEqual(atom.coords, Vec3(0, 0, 0), tol); }
         );
         Vec3 principalAxis   = atom->coords.normalized();
         Vec3 rotationAxis    = principalAxis.cross(Vec3(0, 0, 1));
@@ -326,10 +322,8 @@ void alignCanonically(
     // For Cs point group, we set the reflection plane to the xy-plane.
     if (pointGroup.name == PointGroup::Cs)
     {
-        auto sigmaH = std::find_if(
-            symmetryOperations.begin(),
-            symmetryOperations.end(),
-            [](const SymmetryOperation& op) { return (op.name == SymmetryOperation::sigma_h); }
+        auto sigmaH = std::ranges::find_if(
+            symmetryOperations, [](const SymmetryOperation& op) { return (op.name == SymmetryOperation::sigma_h); }
         );
 
         zAxis = sigmaH->element.normalized();
@@ -339,9 +333,8 @@ void alignCanonically(
              && pointGroup.name != PointGroup::O && pointGroup.name != PointGroup::Oh
              && pointGroup.name != PointGroup::I && pointGroup.name != PointGroup::Ih)
     {
-        auto principalRotation = std::max_element(
-            symmetryOperations.begin(),
-            symmetryOperations.end(),
+        auto principalRotation = std::ranges::max_element(
+            symmetryOperations,
             [](const SymmetryOperation& a, const SymmetryOperation& b)
             {
                 if ((a.name != SymmetryOperation::Cn && a.name != SymmetryOperation::Sn) || a.power != 1)
@@ -359,10 +352,8 @@ void alignCanonically(
     {
         case PointGroup::Cnh:
         {
-            auto sigmaH = std::find_if(
-                symmetryOperations.begin(),
-                symmetryOperations.end(),
-                [](const SymmetryOperation& op) { return (op.name == SymmetryOperation::sigma_h); }
+            auto sigmaH = std::ranges::find_if(
+                symmetryOperations, [](const SymmetryOperation& op) { return (op.name == SymmetryOperation::sigma_h); }
             );
 
             if (zAxis.dot(sigmaH->element) < 0)
@@ -412,11 +403,8 @@ void alignCanonically(
         }
         case PointGroup::Cnv:
         {
-            // Align a vertical reflection plane with the XZ plane.
-            auto sigmaV = std::find_if(
-                symmetryOperations.begin(),
-                symmetryOperations.end(),
-                [](const SymmetryOperation& op) { return (op.name == SymmetryOperation::sigma_v); }
+            auto sigmaV = std::ranges::find_if(
+                symmetryOperations, [](const SymmetryOperation& op) { return (op.name == SymmetryOperation::sigma_v); }
             );
 
             yAxis = sigmaV->element.normalized();
@@ -429,29 +417,22 @@ void alignCanonically(
         {
             // Align the x-axis with the a C2' axis.
             std::vector<SymmetryOperation> perpendicularC2s;
-            std::copy_if(
-                symmetryOperations.begin(),
-                symmetryOperations.end(),
+            std::ranges::copy_if(
+                symmetryOperations,
                 std::back_inserter(perpendicularC2s),
                 [&zAxis, &tol](const SymmetryOperation& op)
                 { return (op.name == SymmetryOperation::Cn && op.n == 2 && areOrthogonal(op.element, zAxis, tol)); }
             );
 
-            // C2' axes are the ones passing through the most atoms, or intersecting the largest number of bonds.
-            auto C2Prime = std::max_element(
-                perpendicularC2s.begin(),
-                perpendicularC2s.end(),
+            auto C2Prime = std::ranges::max_element(
+                perpendicularC2s,
                 [&geometry, &tol](const SymmetryOperation& a, const SymmetryOperation& b)
                 {
-                    size_t atomsIntersected_a = std::count_if(
-                        geometry.begin(),
-                        geometry.end(),
-                        [&a, &tol](const Atom& atom) { return areCollinear(atom.coords, a.element, tol); }
+                    size_t atomsIntersected_a = std::ranges::count_if(
+                        geometry, [&a, &tol](const Atom& atom) { return areCollinear(atom.coords, a.element, tol); }
                     );
-                    size_t atomsIntersected_b = std::count_if(
-                        geometry.begin(),
-                        geometry.end(),
-                        [&a, &tol](const Atom& atom) { return areCollinear(atom.coords, a.element, tol); }
+                    size_t atomsIntersected_b = std::ranges::count_if(
+                        geometry, [&b, &tol](const Atom& atom) { return areCollinear(atom.coords, b.element, tol); }
                     );
                     if (atomsIntersected_a != atomsIntersected_b)
                         return (atomsIntersected_a < atomsIntersected_b);
@@ -483,9 +464,8 @@ void alignCanonically(
         {
             // Align the three C2 axes with the caretesian Axes.
             std::vector<SymmetryOperation> C2Axes;
-            std::copy_if(
-                symmetryOperations.begin(),
-                symmetryOperations.end(),
+            std::ranges::copy_if(
+                symmetryOperations,
                 std::back_inserter(C2Axes),
                 [](const SymmetryOperation& op) { return (op.name == SymmetryOperation::Cn && op.n == 2); }
             );
@@ -506,9 +486,8 @@ void alignCanonically(
         {
             // Align the three C4 axes with the caretesian Axes.
             std::vector<SymmetryOperation> C4Axes;
-            std::copy_if(
-                symmetryOperations.begin(),
-                symmetryOperations.end(),
+            std::ranges::copy_if(
+                symmetryOperations,
                 std::back_inserter(C4Axes),
                 [](const SymmetryOperation& op)
                 { return (op.name == SymmetryOperation::Cn && op.n == 4 && op.power == 1); }
@@ -526,43 +505,37 @@ void alignCanonically(
             // with the caretesian Axes, such that the pair of closest C5
             // axes to the z-axis lie on the YZ plane.
             std::vector<SymmetryOperation> C2Axes;
-            std::copy_if(
-                symmetryOperations.begin(),
-                symmetryOperations.end(),
+            std::ranges::copy_if(
+                symmetryOperations,
                 std::back_inserter(C2Axes),
                 [](const SymmetryOperation& op) { return (op.name == SymmetryOperation::Cn && op.n == 2); }
             );
             zAxis = C2Axes[0].element; // Choose the first C2 axis as the z-axis.
 
-            auto orthogonalC2 = std::find_if(
-                C2Axes.begin(),
-                C2Axes.end(),
-                [&zAxis, &tol](const SymmetryOperation& op) { return areOrthogonal(op.element, zAxis, tol); }
+            auto orthogonalC2 = std::ranges::find_if(
+                C2Axes, [&zAxis, &tol](const SymmetryOperation& op) { return areOrthogonal(op.element, zAxis, tol); }
             );
             xAxis = orthogonalC2->element; // Take the first orthogonal C2 axis as the x-axis
 
             yAxis = zAxis.cross(xAxis); // y axis is determined by the right-hand rule, and will fall on a C2 axis.
 
             std::vector<SymmetryOperation> C5Axes;
-            std::copy_if(
-                symmetryOperations.begin(),
-                symmetryOperations.end(),
+            std::ranges::copy_if(
+                symmetryOperations,
                 std::back_inserter(C5Axes),
                 [](const SymmetryOperation& op)
                 { return (op.name == SymmetryOperation::Cn && op.n == 5 && op.power == 1); }
             );
 
             // find the pair of C5 axes closest to the z-axis
-            auto closestC5_1 = std::min_element(
-                C5Axes.begin(),
-                C5Axes.end(),
+            auto closestC5_1 = std::ranges::min_element(
+                C5Axes,
                 [&zAxis](const SymmetryOperation& a, const SymmetryOperation& b)
                 { return (a.element - zAxis).squaredNorm() < (b.element - zAxis).squaredNorm(); }
             );
 
-            auto closestC5_2 = std::find_if(
-                C5Axes.begin(),
-                C5Axes.end(),
+            auto closestC5_2 = std::ranges::find_if(
+                C5Axes,
                 [&closestC5_1, &zAxis, &tol](const SymmetryOperation& op)
                 {
                     return (
@@ -610,7 +583,7 @@ void alignCanonically(
                 if ((op.name == SymmetryOperation::Cn && op.n == 3) || (op.name == SymmetryOperation::Sn && op.n == 6))
                 {
                     std::vector<double> sortedComponents = {op.element.x(), op.element.y(), op.element.z()};
-                    std::sort(sortedComponents.begin(), sortedComponents.end());
+                    std::ranges::sort(sortedComponents);
                     if (sortedComponents[2] < -tol || (sortedComponents[1] > tol && sortedComponents[0] < -tol))
                     {
                         op.element = -op.element;
@@ -666,9 +639,8 @@ std::vector<std::vector<std::reference_wrapper<const Atom>>> findSEAGroups(const
             fingerprint.emplace_back(distance, geometry[j].atomicNumber);
         }
 
-        std::sort(
-            fingerprint.begin(),
-            fingerprint.end(),
+        std::ranges::sort(
+            fingerprint,
             [tol](const auto& a, const auto& b)
             {
                 if (areEqual(a.first, b.first, tol))
@@ -757,9 +729,8 @@ std::vector<Vec3> getRotationAxesCandidates(const std::vector<std::vector<std::r
     Vec3 atom1 = Vec3(0, 0, 0);
     for (const auto& group : SEAGroups)
     {
-        auto nonZeroAtom = std::find_if(
-            group.begin(),
-            group.end(),
+        auto nonZeroAtom = std::ranges::find_if(
+            group,
             [&tol](const std::reference_wrapper<const Atom>& atom)
             { return !areEqual(atom.get().coords, Vec3(0, 0, 0), tol); }
         );
@@ -772,9 +743,8 @@ std::vector<Vec3> getRotationAxesCandidates(const std::vector<std::vector<std::r
     }
     for (const auto& group : SEAGroups)
     {
-        auto atom2 = std::find_if(
-            group.begin(),
-            group.end(),
+        auto atom2 = std::ranges::find_if(
+            group,
             [&atom1, &tol](const std::reference_wrapper<const Atom>& atom)
             {
                 return (!areEqual(atom.get().coords, Vec3(0, 0, 0), tol) && !areCollinear(atom.get().coords, atom1, tol));
@@ -955,9 +925,8 @@ std::vector<Vec3> getReflectionPlaneNormalsCandidates(
     Vec3 atom1 = Vec3(0, 0, 0);
     for (const auto& group : SEAGroups)
     {
-        auto nonZeroAtom = std::find_if(
-            group.begin(),
-            group.end(),
+        auto nonZeroAtom = std::ranges::find_if(
+            group,
             [&tol](const std::reference_wrapper<const Atom>& atom)
             { return !areEqual(atom.get().coords, Vec3(0, 0, 0), tol); }
         );
@@ -970,9 +939,8 @@ std::vector<Vec3> getReflectionPlaneNormalsCandidates(
     }
     for (const auto& group : SEAGroups)
     {
-        auto atom2 = std::find_if(
-            group.begin(),
-            group.end(),
+        auto atom2 = std::ranges::find_if(
+            group,
             [&atom1, &tol](const std::reference_wrapper<const Atom>& atom)
             {
                 return (!areEqual(atom.get().coords, Vec3(0, 0, 0), tol) && !areCollinear(atom.get().coords, atom1, tol));
@@ -1033,12 +1001,12 @@ void classifyReflectionPlanes(
         return r1.n < r2.n;
     };
 
-    auto highestCn            = std::max_element(properRotations.begin(), properRotations.end(), highestN);
+    auto highestCn            = std::ranges::max_element(properRotations, highestN);
     auto principalRotation    = highestCn;
     bool useImproperRotations = false;
     if (!improperRotations.empty())
     {
-        auto highestSn = std::max_element(improperRotations.begin(), improperRotations.end(), highestN);
+        auto highestSn = std::ranges::max_element(improperRotations, highestN);
         if (highestSn->n > highestCn->n)
         {
             principalRotation    = highestSn;
@@ -1053,9 +1021,8 @@ void classifyReflectionPlanes(
     bool hasMultiplePrincipalAxes = false;
 
     const std::vector<SymmetryOperation>& rotationsOfInterset = (useImproperRotations) ? improperRotations : properRotations;
-    auto secondPrincipalAxis = std::find_if(
-        rotationsOfInterset.begin(),
-        rotationsOfInterset.end(),
+    auto secondPrincipalAxis = std::ranges::find_if(
+        rotationsOfInterset,
         [&principalRotationAxis, &principalRotationOrder, &tol](const SymmetryOperation& rotation)
         {
             return (
@@ -1069,9 +1036,8 @@ void classifyReflectionPlanes(
 
     // Get C2 axes perpendicular to the principal rotation axis.
     std::vector<SymmetryOperation> perpendicularC2s;
-    std::copy_if(
-        properRotations.begin(),
-        properRotations.end(),
+    std::ranges::copy_if(
+        properRotations,
         std::back_inserter(perpendicularC2s),
         [&principalRotationAxis, &tol](const SymmetryOperation& r)
         { return (r.n == 2 && r.power == 1 && areOrthogonal(r.element, principalRotationAxis, tol)); }
@@ -1079,20 +1045,15 @@ void classifyReflectionPlanes(
 
     // Find the C2' axes, which are the ones that go through the most atoms or bonds.
     std::vector<SymmetryOperation> CPrimesAxes;
-    auto C2Prime = std::max_element(
-        perpendicularC2s.begin(),
-        perpendicularC2s.end(),
+    auto C2Prime = std::ranges::max_element(
+        perpendicularC2s,
         [&geometry, &tol](const SymmetryOperation& a, const SymmetryOperation& b)
         {
-            size_t atomsIntersected_a = std::count_if(
-                geometry.begin(),
-                geometry.end(),
-                [&a, &tol](const Atom& atom) { return areCollinear(atom.coords, a.element, tol); }
+            size_t atomsIntersected_a = std::ranges::count_if(
+                geometry, [&a, &tol](const Atom& atom) { return areCollinear(atom.coords, a.element, tol); }
             );
-            size_t atomsIntersected_b = std::count_if(
-                geometry.begin(),
-                geometry.end(),
-                [&a, &tol](const Atom& atom) { return areCollinear(atom.coords, a.element, tol); }
+            size_t atomsIntersected_b = std::ranges::count_if(
+                geometry, [&a, &tol](const Atom& atom) { return areCollinear(atom.coords, a.element, tol); }
             );
             if (atomsIntersected_a != atomsIntersected_b)
                 return (atomsIntersected_a < atomsIntersected_b);
@@ -1117,9 +1078,8 @@ void classifyReflectionPlanes(
     {
         Vec3 C2PrimeGenerator = C2Prime->element;
 
-        std::copy_if(
-            perpendicularC2s.begin(),
-            perpendicularC2s.end(),
+        std::ranges::copy_if(
+            perpendicularC2s,
             std::back_inserter(CPrimesAxes),
             [&principalRotationAxis, &principalRotationOrder, &C2PrimeGenerator, &tol](const SymmetryOperation& c2)
             {
@@ -1145,18 +1105,16 @@ void classifyReflectionPlanes(
         size_t maxAtomsIntersected = 0;
         for (const auto& reflection : reflectionPlanes)
         {
-            size_t atomsIntersected = std::count_if(
-                geometry.begin(),
-                geometry.end(),
+            size_t atomsIntersected = std::ranges::count_if(
+                geometry,
                 [&reflection, &tol](const Atom& atom) { return areOrthogonal(atom.coords, reflection.element, tol); }
             );
             maxAtomsIntersected = std::max(maxAtomsIntersected, atomsIntersected);
         }
         for (auto& reflection : reflectionPlanes)
         {
-            size_t atomsIntersected = std::count_if(
-                geometry.begin(),
-                geometry.end(),
+            size_t atomsIntersected = std::ranges::count_if(
+                geometry,
                 [&reflection, &tol](const Atom& atom) { return areOrthogonal(atom.coords, reflection.element, tol); }
             );
             if (atomsIntersected == maxAtomsIntersected)
@@ -1174,9 +1132,8 @@ void classifyReflectionPlanes(
         {
             if (highestCn->n == 3)
             {
-                auto orthogonalC2 = std::find_if(
-                    properRotations.begin(),
-                    properRotations.end(),
+                auto orthogonalC2 = std::ranges::find_if(
+                    properRotations,
                     [&reflection, &tol](const SymmetryOperation& rotation)
                     { return (rotation.n == 2 && areCollinear(reflection.element, rotation.element, tol)); }
                 );
@@ -1188,9 +1145,8 @@ void classifyReflectionPlanes(
             }
             else if (highestCn->n == 4)
             {
-                auto orthogonalC4 = std::find_if(
-                    properRotations.begin(),
-                    properRotations.end(),
+                auto orthogonalC4 = std::ranges::find_if(
+                    properRotations,
                     [&reflection, &tol](const SymmetryOperation& rotation)
                     {
                         return (
@@ -1219,9 +1175,8 @@ void classifyReflectionPlanes(
         // Check if the reflection plane is a sigma_d or sigma_v plane.
         if (!hasMultiplePrincipalAxes && areOrthogonal(reflection.element, principalRotationAxis, tol))
         {
-            auto containedC2Prime = std::find_if(
-                CPrimesAxes.begin(),
-                CPrimesAxes.end(),
+            auto containedC2Prime = std::ranges::find_if(
+                CPrimesAxes,
                 [&reflection, &tol](const SymmetryOperation& cPrime)
                 { return areOrthogonal(reflection.element, cPrime.element, tol); }
             );
@@ -1289,7 +1244,7 @@ PointGroup classifyPointGroup(const std::vector<Atom>& geometry, const Vec3& pri
         return PointGroup(PointGroup::Kh, 1, {SymmetryOperation::Identity()});
 
     auto sortedMoments = principalMoments;
-    std::sort(sortedMoments.begin(), sortedMoments.end());
+    std::ranges::sort(sortedMoments);
 
     auto SEAGroups = findSEAGroups(geometry, tol);
 
@@ -1339,25 +1294,19 @@ PointGroup classifyPointGroup(const std::vector<Atom>& geometry, const Vec3& pri
         return PointGroup(pointGroupName, 1, allOperations);
     }
 
-    auto principalRotation = std::max_element(
-        properRotations.begin(),
-        properRotations.end(),
-        [](const SymmetryOperation& r1, const SymmetryOperation& r2) { return r1.n < r2.n; }
+    auto principalRotation = std::ranges::max_element(
+        properRotations, [](const SymmetryOperation& r1, const SymmetryOperation& r2) { return r1.n < r2.n; }
     );
     const Vec3& principalRotationAxis = principalRotation->element;
     size_t principalRotationOrder     = principalRotation->n;
 
-    auto sigmaHPlane = std::find_if(
-        reflectionPlanes.begin(),
-        reflectionPlanes.end(),
-        [](const SymmetryOperation& r) { return (r.name == SymmetryOperation::sigma_h); }
+    auto sigmaHPlane = std::ranges::find_if(
+        reflectionPlanes, [](const SymmetryOperation& r) { return (r.name == SymmetryOperation::sigma_h); }
     );
     bool hasSigmaHPlane = (sigmaHPlane != reflectionPlanes.end());
 
-    auto sigmaVPlane = std::find_if(
-        reflectionPlanes.begin(),
-        reflectionPlanes.end(),
-        [](const SymmetryOperation& r) { return (r.name == SymmetryOperation::sigma_v); }
+    auto sigmaVPlane = std::ranges::find_if(
+        reflectionPlanes, [](const SymmetryOperation& r) { return (r.name == SymmetryOperation::sigma_v); }
     );
     bool hasSigmaVPlane = (sigmaVPlane != reflectionPlanes.end());
 
@@ -1415,9 +1364,8 @@ PointGroup classifyPointGroup(const std::vector<Atom>& geometry, const Vec3& pri
     else if (areEqual(sortedMoments[0], sortedMoments[1], tol * 10)
              || areEqual(sortedMoments[1], sortedMoments[2], tol * 10))
     {
-        size_t numOfPerpendicularC2Axes = std::count_if(
-            properRotations.begin(),
-            properRotations.end(),
+        size_t numOfPerpendicularC2Axes = std::ranges::count_if(
+            properRotations,
             [&principalRotationAxis, &tol](const SymmetryOperation& rotation)
             { return (rotation.n == 2 && areOrthogonal(rotation.element, principalRotationAxis, tol)); }
         );
@@ -1448,10 +1396,8 @@ PointGroup classifyPointGroup(const std::vector<Atom>& geometry, const Vec3& pri
     }
 
     // Ia != Ib != Ic: asymmetric top
-    size_t numOfC2Axes = std::count_if(
-        properRotations.begin(),
-        properRotations.end(),
-        [](const SymmetryOperation& rotation) { return (rotation.n == 2); }
+    size_t numOfC2Axes = std::ranges::count_if(
+        properRotations, [](const SymmetryOperation& rotation) { return (rotation.n == 2); }
     );
 
     if (numOfC2Axes == 3)
@@ -1874,7 +1820,7 @@ ProjectionOperators buildProjectionOperators(const PointGroup& pointGroup, const
         Eigen::MatrixXd P = Eigen::MatrixXd::Zero(aos.size(), aos.size());
         for (size_t j = 0; j < classes.size(); ++j)
         {
-            auto it = std::find(charTable.classNames.begin(), charTable.classNames.end(), classNames[j]);
+            auto it = std::ranges::find(charTable.classNames, classNames[j]);
 
             if (it == charTable.classNames.end())
             {
@@ -1898,7 +1844,7 @@ ProjectionOperators buildProjectionOperators(const PointGroup& pointGroup, const
         irrepNames.push_back(charTable.irrepNames[i]);
     }
 
-    return {irrepNames, projectionOperators, AOBasisReps};
+    return {.irrepNames = irrepNames, .operators = projectionOperators, .AOBasisReps = AOBasisReps};
 }
 
 SALCs buildSALCs(const PointGroup& pointGroup, const std::vector<AtomicOrbital>& aos, double tol)
@@ -1985,7 +1931,7 @@ SALCs buildSALCs(const PointGroup& pointGroup, const std::vector<AtomicOrbital>&
     Eigen::MatrixXd U(aos.size(), finalSALCs.size());
     for (size_t i = 0; i < finalSALCs.size(); ++i) { U.col(i) = finalSALCs[i]; }
 
-    return {U, irreps, AOBasisReps};
+    return {.transformationMatrix = U, .irreps = irreps, .AOBasisReps = AOBasisReps};
 }
 
 

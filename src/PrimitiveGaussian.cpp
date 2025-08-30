@@ -3,9 +3,7 @@
 #include "Utils.hpp"
 
 #include <cmath>
-#include <iomanip>
-#include <iostream>
-#include <sstream>
+#include <fmt/core.h>
 #include <string>
 
 PrimitiveGaussian::PrimitiveGaussian(double exponent, double coeff, const Vec3& coords, const Eigen::Vector3i& angularMomentum) :
@@ -33,43 +31,40 @@ double PrimitiveGaussian::normalizationConst(double exponent, const Eigen::Vecto
 
 std::string PrimitiveGaussian::toString() const
 {
-    std::stringstream ss;
-    ss << std::fixed << std::setprecision(8);
-    ss << "PrimitiveGaussian {\n"
-       << "\talpha:    " << this->exponent << "\n"
-       << "\tcoeff:    " << this->coeff << "\n"
-       << "\tcoords:   (" << this->coords.x() << ", " << this->coords.y() << ", " << this->coords.z() << ")\n"
-       << "\t(l,m,n):  (" << this->angularMomentum.x() << ", " << this->angularMomentum.y() << ", "
-       << this->angularMomentum.z() << ")\n"
-       << "\tnorm:     " << this->normConst << "\n"
-       << "}";
-    return ss.str();
+    return fmt::format(
+        "{{\n"
+        "\talpha:    {:.8f}\n"
+        "\tcoeff:    {:.8f}\n"
+        "\tcoords:   ({:.8f}, {:.8f}, {:.8f})\n"
+        "\t(l,m,n):  ({}, {}, {})\n"
+        "\tnorm:     {:.8f}\n"
+        "}}",
+        this->exponent,
+        this->coeff,
+        this->coords.x(),
+        this->coords.y(),
+        this->coords.z(),
+        this->angularMomentum.x(),
+        this->angularMomentum.y(),
+        this->angularMomentum.z(),
+        this->normConst
+    );
 }
 
-
-bool PrimitiveGaussian::operator==(const PrimitiveGaussian& other) const
+std::partial_ordering PrimitiveGaussian::operator<=>(const PrimitiveGaussian& other) const
 {
-    return this->exponent == other.exponent && this->coeff == other.coeff
-        && this->angularMomentum == other.angularMomentum && this->normConst == other.normConst;
-}
+    if (auto cmp = this->exponent <=> other.exponent; cmp != 0)
+        return cmp;
+    if (auto cmp = this->coeff <=> other.coeff; cmp != 0)
+        return cmp;
+    if (auto cmp = this->angularMomentum.x() <=> other.angularMomentum.x(); cmp != 0)
+        return cmp;
+    if (auto cmp = this->angularMomentum.y() <=> other.angularMomentum.y(); cmp != 0)
+        return cmp;
+    if (auto cmp = this->angularMomentum.z() <=> other.angularMomentum.z(); cmp != 0)
+        return cmp;
+    if (auto cmp = this->normConst <=> other.normConst; cmp != 0)
+        return cmp;
 
-bool PrimitiveGaussian::operator<(const PrimitiveGaussian& other) const
-{
-    if (this->exponent != other.exponent)
-        return this->exponent < other.exponent;
-    if (this->coeff != other.coeff)
-        return this->coeff < other.coeff;
-    if (this->angularMomentum.sum() != other.angularMomentum.sum())
-        return this->angularMomentum.sum() < other.angularMomentum.sum();
-    if (this->angularMomentum.x() != other.angularMomentum.x())
-        return this->angularMomentum.x() < other.angularMomentum.x();
-    if (this->angularMomentum.y() != other.angularMomentum.y())
-        return this->angularMomentum.y() < other.angularMomentum.y();
-    if (this->angularMomentum.z() != other.angularMomentum.z())
-        return this->angularMomentum.z() < other.angularMomentum.z();
-    if (this->coords != other.coords)
-        return this->coords.x() < other.coords.x();
-    if (this->coords.y() != other.coords.y())
-        return this->coords.y() < other.coords.y();
-    return this->coords.z() < other.coords.z();
+    return std::partial_ordering::equivalent;
 }

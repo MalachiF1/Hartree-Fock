@@ -3,7 +3,9 @@
 #include "Utils.hpp"
 
 #include <cmath>
+#include <fmt/core.h>
 #include <iostream>
+#include <ranges>
 
 AtomicOrbital::AtomicOrbital(
     const Vec3& center, const Eigen::Vector3i& angularMomentum, const std::vector<PrimitiveGaussian>& primitives
@@ -14,21 +16,32 @@ AtomicOrbital::AtomicOrbital(
 
 std::string AtomicOrbital::toString() const
 {
-    std::stringstream ss;
-    ss << "AtomicOrbital with " << primitives.size() << " primitive Gaussians at center (" << center.x() << ", "
-       << center.y() << ", " << center.z() << "):\n{\n";
-
-    return ss.str();
+    return fmt::format(
+        "AtomicOrbital with {} primitive Gaussians at center ({:.8f}, {:.8f}, {:.8f}):\n{{\n",
+        primitives.size(),
+        center.x(),
+        center.y(),
+        center.z()
+    );
 }
 
 
 bool AtomicOrbital::operator==(const AtomicOrbital& other) const
 {
-    auto primitives1 = this->primitives;
-    auto primitives2 = other.primitives;
-    std::sort(primitives1.begin(), primitives1.end());
-    std::sort(primitives2.begin(), primitives2.end());
-    return (this->center == other.center && this->angularMomentum == other.angularMomentum && primitives1 == primitives2);
+    if (this->center != other.center || this->angularMomentum != other.angularMomentum
+        || this->primitives.size() != other.primitives.size())
+        return false;
+
+    std::vector<PrimitiveGaussian> primitives1 = this->primitives;
+    std::vector<PrimitiveGaussian> primitives2 = other.primitives;
+    auto comparator                            = [](const PrimitiveGaussian& a, const PrimitiveGaussian& b)
+    {
+        return std::tie(a.exponent, a.coeff, a.angularMomentum.x(), a.angularMomentum.y(), a.angularMomentum.z(), a.normConst)
+             < std::tie(b.exponent, b.coeff, b.angularMomentum.x(), b.angularMomentum.y(), b.angularMomentum.z(), b.normConst);
+    };
+    std::ranges::sort(primitives1, comparator);
+    std::ranges::sort(primitives2, comparator);
+    return primitives1 == primitives2;
 }
 
 double AtomicOrbital::overlap(const AtomicOrbital& ao1, const AtomicOrbital& ao2)
@@ -333,8 +346,9 @@ bool AtomicOrbital::sameSubshell(const AtomicOrbital& ao1, const AtomicOrbital& 
     for (const auto& primitive : ao2.getPrimitives())
         exponentCoeffPairs2.emplace_back(primitive.exponent, primitive.coeff);
 
-    std::sort(exponentCoeffPairs1.begin(), exponentCoeffPairs1.end());
-    std::sort(exponentCoeffPairs2.begin(), exponentCoeffPairs2.end());
+    std::ranges::sort(exponentCoeffPairs1);
+    std::ranges::sort(exponentCoeffPairs2);
+
 
     return exponentCoeffPairs1 == exponentCoeffPairs2;
 }

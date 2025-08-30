@@ -2,16 +2,15 @@
 
 #include "Basis.hpp"
 #include "Eigen/Core"
-#include "Symmetry/CharacterTable.hpp"
 #include "Symmetry/Symmetry.hpp"
 #include "Utils.hpp"
 
 #include <cmath>
 #include <cstddef>
 #include <cstdlib>
-#include <iomanip>
-#include <ios>
-#include <iostream>
+#include <fmt/core.h>
+#include <fmt/ranges.h>
+#include <ranges>
 #include <sstream>
 
 Molecule::Molecule(
@@ -42,33 +41,32 @@ Molecule::Molecule(
 
 std::string Molecule::toString() const
 {
-    std::stringstream ss;
-    ss << "Molecule with charge " << charge << " and multiplicity " << multiplicity << ":\n";
-    ss << "Number of electrons: " << electronCount << "\n";
-    ss << "Number of basis functions: " << basisFunctionCount << "\n";
-    ss << "Geometry (atom, x, y, z):\n";
-
-    auto format = [](double num) -> std::string
-    {
-        std::stringstream ss;
-
-        if (std::signbit(num))
-            ss << "-";
-        else
-            ss << " ";
-
-        ss << std::left << std::fixed << std::setprecision(8) << std::abs(num);
-
-        return ss.str();
-    };
-
-    for (const auto& atom : geometry)
-    {
-        ss << "\t" << Utils::atomicNumberToName.at(atom.atomicNumber) << "\t" << format(atom.coords.x()) << "\t"
-           << format(atom.coords.y()) << "\t" << format(atom.coords.z()) << "\n";
-    }
-    ss << "Point Group: " << pointGroup.toString() << "\n";
-    return ss.str();
+    return fmt::format(
+        "Molecule with charge {} and multiplicity {}:\nNumber of electrons: {}\nNumber of basis functions: "
+        "{}\nGeometry (atom, x, y, z):\n{}Point Group: {}\n",
+        charge,
+        multiplicity,
+        electronCount,
+        basisFunctionCount,
+        fmt::join(
+            geometry
+                | std::views::transform(
+                    [](const Atom& atom)
+                    {
+                        return fmt::format(
+                            "\t{:<2} {:>3} {:>13.8f} {:>13.8f} {:>13.8f}\n",
+                            Utils::atomicNumberToName.at(atom.atomicNumber),
+                            atom.atomicNumber,
+                            atom.coords.x(),
+                            atom.coords.y(),
+                            atom.coords.z()
+                        );
+                    }
+                ),
+            ""
+        ),
+        pointGroup.toString()
+    );
 }
 
 
@@ -80,62 +78,58 @@ std::vector<std::string> Molecule::getAOLabels() const
     {
         const AtomicOrbital& ao = atomicOrbitals[i];
         std::stringstream label;
-        auto atom = std::find_if(
-            geometry.begin(),
-            geometry.end(),
-            [&ao](const Atom& a) { return std::abs((a.coords - ao.center).squaredNorm()) < 1e-12; }
+        auto atom = std::ranges::find_if(
+            geometry, [&ao](const Atom& a) { return std::abs((a.coords - ao.center).squaredNorm()) < 1e-12; }
         );
-        // get the nubmer of atoms of same atomic number before this atom
-        size_t atomCount = std::count_if(
+        // Get the number of atoms of same atomic number before this atom.
+        size_t atomCount = std::ranges::count_if(
             geometry.begin(), atom, [&atom](const Atom& a) { return a.atomicNumber == atom->atomicNumber; }
         );
 
-        label << std::left << std::setw(3) << i + 1 << " " << std::setw(2)
-              << Utils::atomicNumberToName.at(atom->atomicNumber) << " " << std::setw(2) << atomCount + 1;
+        label << fmt::format("{:<3} {:<2} {:<2} ", i + 1, Utils::atomicNumberToName.at(atom->atomicNumber), atomCount + 1);
 
-        label << " ";
         switch (ao.angularMomentum.sum())
         {
             case 0: label << "s"; break; // s-orbital
             case 1:
             {
-                label << "p" << std::setw(4);
+                std::string sublabel;
                 if (ao.angularMomentum.x() == 1)
-                    label << "x";
+                    sublabel = "x";
                 else if (ao.angularMomentum.y() == 1)
-                    label << "y";
+                    sublabel = "y";
                 else if (ao.angularMomentum.z() == 1)
-                    label << "z";
+                    sublabel = "z";
+                label << fmt::format("p{:<4}", sublabel);
                 break;
             }
             case 2:
             {
-                label << "d" << std::setw(4);
-
+                std::string sublabel;
                 if (ao.angularMomentum.x() == 2)
-                    label << "x2";
+                    sublabel = "x2";
                 else if (ao.angularMomentum.y() == 2)
-                    label << "y2";
+                    sublabel = "y2";
                 else if (ao.angularMomentum.z() == 2)
-                    label << "z2";
+                    sublabel = "z2";
                 else if (ao.angularMomentum.x() == 1 && ao.angularMomentum.y() == 1)
-                    label << "xy";
+                    sublabel = "xy";
                 else if (ao.angularMomentum.x() == 1 && ao.angularMomentum.z() == 1)
-                    label << "xz";
+                    sublabel = "xz";
                 else if (ao.angularMomentum.y() == 1 && ao.angularMomentum.z() == 1)
-                    label << "yz";
+                    sublabel = "yz";
+                label << fmt::format("d{:<4}", sublabel);
                 break;
             }
             case 3:
             {
-                label << "f" << std::setw(4);
-
+                std::string sublabel;
                 if (ao.angularMomentum.x() == 3)
-                    label << "x3";
+                    sublabel = "x3";
                 else if (ao.angularMomentum.y() == 3)
-                    label << "y3";
+                    sublabel = "y3";
                 else if (ao.angularMomentum.z() == 3)
-                    label << "z3";
+                    sublabel = "z3";
                 else if (ao.angularMomentum.x() == 2 && ao.angularMomentum.y() == 1)
                     label << "x2y";
                 else if (ao.angularMomentum.x() == 2 && ao.angularMomentum.z() == 1)
@@ -149,42 +143,44 @@ std::vector<std::string> Molecule::getAOLabels() const
                 else if (ao.angularMomentum.z() == 2 && ao.angularMomentum.y() == 1)
                     label << "z2y";
                 else if (ao.angularMomentum.x() == 1 && ao.angularMomentum.y() == 1 && ao.angularMomentum.z() == 1)
-                    label << "xyz";
+                    sublabel = "xyz";
+                label << fmt::format("f{:<4}", sublabel);
                 break;
             }
             case 4:
             {
-                label << "g" << std::setw(4);
+                std::string sublabel;
                 if (ao.angularMomentum.x() == 4)
-                    label << "x4";
+                    sublabel = "x4";
                 else if (ao.angularMomentum.y() == 4)
-                    label << "y4";
+                    sublabel = "y4";
                 else if (ao.angularMomentum.z() == 4)
-                    label << "z4";
+                    sublabel = "z4";
                 else if (ao.angularMomentum.x() == 3 && ao.angularMomentum.y() == 1)
-                    label << "x3y";
+                    sublabel = "x3y";
                 else if (ao.angularMomentum.x() == 3 && ao.angularMomentum.z() == 1)
-                    label << "x3z";
+                    sublabel = "x3z";
                 else if (ao.angularMomentum.y() == 3 && ao.angularMomentum.x() == 1)
-                    label << "y3x";
+                    sublabel = "y3x";
                 else if (ao.angularMomentum.y() == 3 && ao.angularMomentum.z() == 1)
-                    label << "y3z";
+                    sublabel = "y3z";
                 else if (ao.angularMomentum.z() == 3 && ao.angularMomentum.x() == 1)
-                    label << "z3x";
+                    sublabel = "z3x";
                 else if (ao.angularMomentum.z() == 3 && ao.angularMomentum.y() == 1)
-                    label << "z3y";
+                    sublabel = "z3y";
                 else if (ao.angularMomentum.x() == 2 && ao.angularMomentum.y() == 2)
-                    label << "x2y2";
+                    sublabel = "x2y2";
                 else if (ao.angularMomentum.x() == 2 && ao.angularMomentum.z() == 2)
-                    label << "x2z2";
+                    sublabel = "x2z2";
                 else if (ao.angularMomentum.y() == 2 && ao.angularMomentum.z() == 2)
-                    label << "y2z2";
+                    sublabel = "y2z2";
                 else if (ao.angularMomentum.x() == 1 && ao.angularMomentum.y() == 1 && ao.angularMomentum.z() == 2)
-                    label << "xyz2";
+                    sublabel = "xyz2";
                 else if (ao.angularMomentum.x() == 1 && ao.angularMomentum.z() == 1 && ao.angularMomentum.y() == 2)
-                    label << "xy2z";
+                    sublabel = "xy2z";
                 else if (ao.angularMomentum.y() == 1 && ao.angularMomentum.z() == 1 && ao.angularMomentum.x() == 2)
-                    label << "x2yz";
+                    sublabel = "x2yz";
+                label << fmt::format("g{:<4}", sublabel);
                 break;
             }
             default: break;
@@ -210,7 +206,7 @@ void Molecule::buildBasis(const std::string& basisName)
     for (const auto& atom : geometry)
     {
         // Ensure that no duplicate atomic numbers are added to the elements vector.
-        if (std::find(elements.begin(), elements.end(), atom.atomicNumber) == elements.end())
+        if (std::ranges::find(elements, atom.atomicNumber) == elements.end())
             elements.push_back(atom.atomicNumber);
     }
 

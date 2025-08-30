@@ -4,20 +4,24 @@
 CXX = g++
 
 # Debugging / optimization flags
-# -Wall -Wextra / -O3 -march=native -flto (also add -flto in LDFLAGS)
+# -g -Wall -Wextra / -O3 -march=native -flto (also add -flto in LDFLAGS)
 
 # Compiler flags
-CXXFLAGS = -std=c++17 -Iinclude -Ieigen -Inlohmann -fopenmp -O3 -march=native -pg
+CXXFLAGS = -std=c++20 -Iinclude -Ieigen -Inlohmann -Ifmt/include -fopenmp -pg -O3 -march=native -Wall -Wextra
 
 # Linker flags (e.g., for linking external libraries)
 # link OpenBLAS statically
-LDFLAGS = -Wl,-Bstatic -lopenblas -Wl,-Bdynamic
+LDFLAGS = -fopenmp -Wl,-Bstatic -lopenblas -Wl,-Bdynamic -pg
 
 # Directories
 SRCDIR = src
 INCDIR = include
 OBJDIR = obj
 BINDIR = bin
+
+# We need to build the fmt library as well (not header-only).
+FMT_SRC = fmt/src/format.cc
+FMT_OBJ = $(OBJDIR)/fmt.o
 
 # Executable name
 TARGET = $(BINDIR)/hf_program
@@ -33,9 +37,14 @@ all: $(TARGET)
 
 # Rule to link the final executable
 # The pipe '|' indicates an order-only prerequisite, ensuring the directory exists before linking.
-$(TARGET): $(OBJECTS) | $(BINDIR)
+$(TARGET): $(OBJECTS) $(FMT_OBJ) | $(BINDIR)
 	$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS)
 	@echo "Build complete. Run the program with: make run"
+
+# Rule to compile the fmt library
+$(FMT_OBJ): $(FMT_SRC)
+	@mkdir -p $(@D)
+	$(CXX) $(CXXFLAGS) -c -o $@ $<
 
 # Rule to compile a .cpp source file into a .o object file
 $(OBJDIR)/%.o: $(SRCDIR)/%.cpp
@@ -63,4 +72,3 @@ clean:
 
 # Phony targets are not real files
 .PHONY: all clean run
-

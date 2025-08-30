@@ -8,6 +8,7 @@
 #include <fstream>
 #include <iostream>
 #include <numeric>
+#include <ranges>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -43,13 +44,10 @@ std::pair<Molecule, SCFOptions> Input::read()
     std::string line;
     size_t lineNumber = 0;
 
-    auto toLowerString = [](const std::string& str)
+    auto toLowerString = [](std::string_view sv) -> std::string
     {
-        std::string lowerStr = str;
-        std::transform(
-            lowerStr.begin(), lowerStr.end(), lowerStr.begin(), [](unsigned char c) { return std::tolower(c); }
-        );
-        return lowerStr;
+        auto view = sv | std::ranges::views::transform(::tolower);
+        return std::string(view.begin(), view.end());
     };
 
     while (std::getline(inputFile, line))
@@ -61,25 +59,26 @@ std::pair<Molecule, SCFOptions> Input::read()
 
         while (iss >> token)
         {
+            std::string lwrToken = toLowerString(token);
             if (token[0] == '#') // Comment
                 break;
 
-            if (toLowerString(token) == "$molecule")
+            if (lwrToken == "$molecule")
             {
                 inMoleculeBlock = true;
                 continue;
             }
-            else if (toLowerString(token) == "$basis")
+            else if (lwrToken == "$basis")
             {
                 inBasisBlock = true;
                 continue;
             }
-            else if (toLowerString(token) == "$scf")
+            else if (lwrToken == "$scf")
             {
                 inSCFBlock = true;
                 continue;
             }
-            else if (toLowerString(token) == "$end")
+            else if (lwrToken == "$end")
             {
                 inMoleculeBlock = false;
                 inBasisBlock    = false;
@@ -173,7 +172,7 @@ Input::MoleculeSettings Input::parseMoleculeBlock(const std::string& moleculeBlo
             );
         }
 
-        if (std::all_of(atomStr.begin(), atomStr.end(), ::isdigit))
+        if (std::ranges::all_of(atomStr, ::isdigit))
         {
             unsigned atomicNumber = std::stoi(atomStr);
             settings.geometry.emplace_back(atomicNumber, Vec3(x, y, z));
@@ -206,13 +205,10 @@ Input::BasisSettings Input::parseBasisBlock(const std::string& basisBlock)
 Input::SCFInputSettings Input::parseSCFBlock(const std::string& SCFBlock)
 {
 
-    auto toLowerString = [](const std::string& str)
+    auto toLowerString = [](std::string_view sv) -> std::string
     {
-        std::string lowerStr = str;
-        std::transform(
-            lowerStr.begin(), lowerStr.end(), lowerStr.begin(), [](unsigned char c) { return std::tolower(c); }
-        );
-        return lowerStr;
+        auto view = sv | std::ranges::views::transform(::tolower);
+        return std::string(view.begin(), view.end());
     };
 
     Input::SCFInputSettings settings;
@@ -330,7 +326,7 @@ Input::SCFInputSettings Input::parseSCFBlock(const std::string& SCFBlock)
                 settings.scfOptions.guessMix = 1;
             else if (toLowerString(mixStr) == "false")
                 settings.scfOptions.guessMix = 0;
-            else if (std::all_of(mixStr.begin(), mixStr.end(), ::isdigit))
+            else if (std::ranges::all_of(mixStr, ::isdigit))
             {
                 int mixVal = std::stoi(mixStr);
                 if (mixVal < 0 || mixVal > 10)
@@ -501,14 +497,13 @@ void Input::validateSettings(
     if (scfSettings.optionsSet[STOP_LSHIFT_THRESH] && scfSettings.scfOptions.levelShift == 0)
         warnings.emplace_back("STOP_LSHIFT_THRESH is set, but it will have no effect because level shifting is off.");
 
-    std::string lowercaseName = basisSettings.basisName;
-    std::transform(
-        lowercaseName.begin(),
-        lowercaseName.end(),
-        lowercaseName.begin(),
-        [](unsigned char c) { return std::tolower(c); }
-    );
-    std::string basisPath = "basis_sets/" + lowercaseName + ".json";
+    auto toLowerString = [](std::string_view sv) -> std::string
+    {
+        auto view = sv | std::ranges::views::transform(::tolower);
+        return std::string(view.begin(), view.end());
+    };
+    std::string lowercaseName = toLowerString(basisSettings.basisName);
+    std::string basisPath     = "basis_sets/" + lowercaseName + ".json";
     if (!std::filesystem::exists(basisPath))
     {
         throw std::runtime_error("Basis set '" + basisSettings.basisName + "' not found.");

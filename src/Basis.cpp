@@ -11,13 +11,12 @@
 std::map<int, std::vector<Shell>> Basis::getBasis(const std::string& name, const std::vector<int>& elements)
 {
     // convert name to lowercase for case-insensitive comparison
-    std::string lowercaseName = name;
-    std::transform(
-        lowercaseName.begin(),
-        lowercaseName.end(),
-        lowercaseName.begin(),
-        [](unsigned char c) { return std::tolower(c); }
-    );
+    auto toLowerString = [](std::string_view sv) -> std::string
+    {
+        auto view = sv | std::ranges::views::transform(::tolower);
+        return std::string(view.begin(), view.end());
+    };
+    std::string lowercaseName = toLowerString(name);
 
     // replace '*' with '_st_'
     size_t startPos = 0;

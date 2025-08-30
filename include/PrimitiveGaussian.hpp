@@ -30,9 +30,8 @@ class PrimitiveGaussian
      */
     std::string toString() const;
 
-    bool operator==(const PrimitiveGaussian& other) const;
-
-    bool operator<(const PrimitiveGaussian& other) const;
+    std::partial_ordering operator<=>(const PrimitiveGaussian& other) const;
+    bool operator==(const PrimitiveGaussian& other) const = default;
 
   private:
     /**

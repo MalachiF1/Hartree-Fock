@@ -1,6 +1,8 @@
 #include "Utils.hpp"
 
 #include <cmath>
+#include <ranges>
+#include <string>
 #include <unordered_map>
 
 namespace Utils
@@ -39,8 +41,13 @@ extern const std::unordered_map<unsigned, std::string> atomicNumberToName = {
 
 size_t CaseInsensitiveHash::operator()(const std::string& str) const
 {
-    std::string lowerStr = str;
-    std::transform(lowerStr.begin(), lowerStr.end(), lowerStr.begin(), [](unsigned char c) { return std::tolower(c); });
+    auto toLowerString = [](std::string_view sv) -> std::string
+    {
+        auto view = sv | std::ranges::views::transform(::tolower);
+        return std::string(view.begin(), view.end());
+    };
+    std::string lowerStr = toLowerString(str);
+
     return std::hash<std::string>()(lowerStr);
 }
 
