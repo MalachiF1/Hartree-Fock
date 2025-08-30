@@ -22,8 +22,12 @@ struct SCFOptions
     bool unrestricted        = false;
     int guessMix             = false;
     int damp                 = 0;
-    size_t maxDampIter       = 0;
+    size_t maxDampIter       = 30;
     double stopDampThresh    = 0;
+    double levelShift        = 0;
+    double lshiftGapTol      = std::numeric_limits<double>::infinity();
+    double maxLshiftIter     = 30;
+    double stopLshiftThresh  = 0;
 };
 
 /**
@@ -85,7 +89,10 @@ class SCF
     Eigen::MatrixXd F_beta;
     Eigen::MatrixXd C_beta;
     Eigen::VectorXd eigenvalues_beta;
-    Eigen::MatrixXd D_tot; // D_alpha + D_beta
+    Eigen::MatrixXd D_tot;      // D_alpha + D_beta
+    double dampCoeff;           // Damping coefficient for the current iteration.
+    bool useLevelShiftingAlpha; // Whether to use level shifting on F_alpha in the current iteration.
+    bool useLevelShiftingBeta;  // Whether to use level shifting on F_beta in the current iteration.
 
     // Pointer to the DIIS object (if used).
     std::unique_ptr<DIIS> diis_handler;

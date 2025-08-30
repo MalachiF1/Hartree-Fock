@@ -127,6 +127,16 @@ std::pair<Molecule, SCFOptions> Input::read()
         options.unrestricted = molecule.getMultiplicity() != 1;
     }
 
+    if (!scfInputSettings.optionsSet[MAX_DAMP_CYCLES])
+    {
+        options.maxDampIter = options.maxIter;
+    }
+
+    if (!scfInputSettings.optionsSet[MAX_LSHIFT_CYCLES])
+    {
+        options.maxLshiftIter = options.maxIter;
+    }
+
     return {molecule, options};
 }
 
@@ -191,109 +201,6 @@ Input::BasisSettings Input::parseBasisBlock(const std::string& basisBlock)
     if (basisStream.fail() || (basisStream >> extraToken))
         throw std::runtime_error("Error in basis set specification in $basis block.");
     return settings;
-}
-
-void Input::validateSettings(
-    const MoleculeSettings& moleculeSettings,
-    const BasisSettings& basisSettings,
-    const SCFInputSettings& scfSettings,
-    std::vector<std::string>& warnings
-)
-{
-    std::vector<std::string> errors;
-
-    if (scfSettings.optionsSet[MAX_ITER] && scfSettings.scfOptions.maxIter == 0)
-        errors.emplace_back("MAX_ITER in $scf block must be greater than 0.");
-
-    if (scfSettings.optionsSet[ENERGY_TOL] && scfSettings.scfOptions.energyTol < 0)
-        errors.emplace_back("ENERGY_TOL in $scf block must be non-negative.");
-
-    if (scfSettings.optionsSet[DENSITY_TOL] && scfSettings.scfOptions.densityTol < 0)
-        errors.emplace_back("DENSITY_TOL in $scf block must be non-negative.");
-
-    if (scfSettings.optionsSet[DIIS_MAX_SIZE] && scfSettings.scfOptions.DIISmaxSize < 1)
-        errors.emplace_back("DIIS_SIZE in $scf block must be greater than 0.");
-
-    if (scfSettings.optionsSet[DIIS_ERROR_TOL] && scfSettings.scfOptions.DIISErrorTol < 0)
-        errors.emplace_back("DIIS_TOL in $scf block must be non-negative.");
-
-    if (scfSettings.optionsSet[SCHWARTZ_THRESH] && scfSettings.scfOptions.schwartzThreshold < 0)
-        errors.emplace_back("SCHWARTZ_THRESH in $scf block must be non-negative.");
-
-    if (scfSettings.optionsSet[DENSITY_THRESH] && scfSettings.scfOptions.densityThreshold < 0)
-        errors.emplace_back("DENSITY_THRESH in $scf block must be non-negative.");
-
-    if (scfSettings.optionsSet[SYMMETRY_TOL] && scfSettings.scfOptions.symmetryTolerance < 0)
-        errors.emplace_back("SYMMETRY_TOL in $scf block must be non-negative.");
-
-    if (scfSettings.optionsSet[DAMP] && (scfSettings.scfOptions.damp < 0 || scfSettings.scfOptions.damp > 100))
-        errors.emplace_back("DAMP in $scf block must be between 0 and 100.");
-
-    if (scfSettings.optionsSet[MAX_DAMP_CYCLES] && scfSettings.scfOptions.maxDampIter <= 0)
-        errors.emplace_back("MAX_DAMP_CYCLES in $scf block must be a positive integer.");
-
-    if (scfSettings.optionsSet[STOP_DAMP_THRESH] && scfSettings.scfOptions.stopDampThresh < 0)
-        errors.emplace_back("STOP_DAMP_THRESH in $scf block must be non-negative.");
-
-    size_t electronCount = std::accumulate(
-        moleculeSettings.geometry.begin(),
-        moleculeSettings.geometry.end(),
-        -moleculeSettings.charge,
-        [](size_t acc, const Atom& atom) { return acc + atom.atomicNumber; }
-    );
-
-    bool unrestricted = scfSettings.scfOptions.unrestricted;
-    if (!scfSettings.optionsSet[UNRESTRICTED])
-    {
-        unrestricted = (moleculeSettings.multiplicity != 1);
-    }
-
-    if (scfSettings.optionsSet[UNRESTRICTED])
-    {
-        if (!scfSettings.scfOptions.unrestricted && moleculeSettings.multiplicity != 1)
-            errors.emplace_back(
-                "Multiplicity set to " + std::to_string(moleculeSettings.multiplicity)
-                + " but the SCF method is restricted (RHF). Set multiplicity to 1 or use unrestricted (UHF) method."
-            );
-    }
-
-    if (scfSettings.scfOptions.guessMix > 0 && !unrestricted)
-        errors.emplace_back("The guess_mix option can only be used with unrestricted calculations.");
-
-    if (electronCount + 1 < moleculeSettings.multiplicity || (electronCount - moleculeSettings.multiplicity) % 2 == 0)
-        errors.emplace_back("Invalid combination of charge and multiplicity.");
-
-    // --- Warnings ---
-    if (scfSettings.optionsSet[DIIS_MAX_SIZE] && !scfSettings.scfOptions.useDIIS)
-        warnings.emplace_back("DIIS_SIZE is set, but it will have no effect because diis is disabled.");
-    if (scfSettings.optionsSet[DIIS_ERROR_TOL] && !scfSettings.scfOptions.useDIIS)
-        warnings.emplace_back("DIIS_TOL is set, but it will have no effect because diis is disabled.");
-    if (scfSettings.optionsSet[MAX_DAMP_CYCLES] && scfSettings.scfOptions.damp == 0)
-        warnings.emplace_back("MAX_DAMP_CYCLES is set, but it will have no effect because damp is 0.");
-    if (scfSettings.optionsSet[STOP_DAMP_THRESH] && scfSettings.scfOptions.damp == 0)
-        warnings.emplace_back("STOP_DAMP_THRESH is set, but it will have no effect because damp is 0.");
-    if (scfSettings.optionsSet[DENSITY_THRESH] && !scfSettings.scfOptions.direct)
-        warnings.emplace_back("DENSITY_THRESH is set, but it will have no effect because direct SCF is not enabled.");
-
-    std::string lowercaseName = basisSettings.basisName;
-    std::transform(
-        lowercaseName.begin(),
-        lowercaseName.end(),
-        lowercaseName.begin(),
-        [](unsigned char c) { return std::tolower(c); }
-    );
-    std::string basisPath = "basis_sets/" + lowercaseName + ".json";
-    if (!std::filesystem::exists(basisPath))
-    {
-        throw std::runtime_error("Basis set '" + basisSettings.basisName + "' not found.");
-    }
-
-    if (!errors.empty())
-    {
-        std::string errorMessage = "INPUT ERROR:\n";
-        for (const auto& error : errors) { errorMessage += "- " + error + "\n"; }
-        throw std::runtime_error(errorMessage);
-    }
 }
 
 Input::SCFInputSettings Input::parseSCFBlock(const std::string& SCFBlock)
@@ -457,6 +364,26 @@ Input::SCFInputSettings Input::parseSCFBlock(const std::string& SCFBlock)
             SCFStream >> settings.scfOptions.stopDampThresh;
             settings.optionsSet[STOP_DAMP_THRESH] = true;
         }
+        else if (tokenLwr == "level_shift")
+        {
+            SCFStream >> settings.scfOptions.levelShift;
+            settings.optionsSet[LEVEL_SHIFT] = true;
+        }
+        else if (tokenLwr == "lshift_gap_tol")
+        {
+            SCFStream >> settings.scfOptions.lshiftGapTol;
+            settings.optionsSet[LSHIFT_GAP_TOL] = true;
+        }
+        else if (tokenLwr == "max_lshift_cycles")
+        {
+            SCFStream >> settings.scfOptions.maxLshiftIter;
+            settings.optionsSet[MAX_LSHIFT_CYCLES] = true;
+        }
+        else if (tokenLwr == "stop_lshift_thresh")
+        {
+            SCFStream >> settings.scfOptions.stopLshiftThresh;
+            settings.optionsSet[STOP_LSHIFT_THRESH] = true;
+        }
         else
         {
             throw std::runtime_error("Unknown option in $scf block: " + token);
@@ -470,4 +397,127 @@ Input::SCFInputSettings Input::parseSCFBlock(const std::string& SCFBlock)
 
 
     return settings;
+}
+
+void Input::validateSettings(
+    const MoleculeSettings& moleculeSettings,
+    const BasisSettings& basisSettings,
+    const SCFInputSettings& scfSettings,
+    std::vector<std::string>& warnings
+)
+{
+    std::vector<std::string> errors;
+
+    if (scfSettings.optionsSet[MAX_ITER] && scfSettings.scfOptions.maxIter == 0)
+        errors.emplace_back("MAX_ITER in $scf block must be greater than 0.");
+
+    if (scfSettings.optionsSet[ENERGY_TOL] && scfSettings.scfOptions.energyTol < 0)
+        errors.emplace_back("ENERGY_TOL in $scf block must be non-negative.");
+
+    if (scfSettings.optionsSet[DENSITY_TOL] && scfSettings.scfOptions.densityTol < 0)
+        errors.emplace_back("DENSITY_TOL in $scf block must be non-negative.");
+
+    if (scfSettings.optionsSet[DIIS_MAX_SIZE] && scfSettings.scfOptions.DIISmaxSize < 1)
+        errors.emplace_back("DIIS_SIZE in $scf block must be greater than 0.");
+
+    if (scfSettings.optionsSet[DIIS_ERROR_TOL] && scfSettings.scfOptions.DIISErrorTol < 0)
+        errors.emplace_back("DIIS_TOL in $scf block must be non-negative.");
+
+    if (scfSettings.optionsSet[SCHWARTZ_THRESH] && scfSettings.scfOptions.schwartzThreshold < 0)
+        errors.emplace_back("SCHWARTZ_THRESH in $scf block must be non-negative.");
+
+    if (scfSettings.optionsSet[DENSITY_THRESH] && scfSettings.scfOptions.densityThreshold < 0)
+        errors.emplace_back("DENSITY_THRESH in $scf block must be non-negative.");
+
+    if (scfSettings.optionsSet[SYMMETRY_TOL] && scfSettings.scfOptions.symmetryTolerance < 0)
+        errors.emplace_back("SYMMETRY_TOL in $scf block must be non-negative.");
+
+    if (scfSettings.optionsSet[DAMP] && (scfSettings.scfOptions.damp < 0 || scfSettings.scfOptions.damp > 100))
+        errors.emplace_back("DAMP in $scf block must be between 0 and 100.");
+
+    if (scfSettings.optionsSet[MAX_DAMP_CYCLES] && scfSettings.scfOptions.maxDampIter <= 0)
+        errors.emplace_back("MAX_DAMP_CYCLES in $scf block must be a positive integer.");
+
+    if (scfSettings.optionsSet[STOP_DAMP_THRESH] && scfSettings.scfOptions.stopDampThresh < 0)
+        errors.emplace_back("STOP_DAMP_THRESH in $scf block must be non-negative.");
+
+    if (scfSettings.optionsSet[LEVEL_SHIFT] && scfSettings.scfOptions.levelShift < 0)
+        errors.emplace_back("LEVEL_SHIFT in $scf block must be non-negative.");
+
+    if (scfSettings.optionsSet[LSHIFT_GAP_TOL] && scfSettings.scfOptions.lshiftGapTol <= 0)
+        errors.emplace_back("LSHIFT_GAP_TOL in $scf block must be positive.");
+
+    if (scfSettings.optionsSet[MAX_LSHIFT_CYCLES] && scfSettings.scfOptions.maxLshiftIter <= 0)
+        errors.emplace_back("MAX_LSHIFT_CYCLES in $scf block must be a positive integer.");
+
+    if (scfSettings.optionsSet[STOP_LSHIFT_THRESH] && scfSettings.scfOptions.stopLshiftThresh < 0)
+        errors.emplace_back("STOP_LSHIFT_THRESH in $scf block must be non-negative.");
+
+    size_t electronCount = std::accumulate(
+        moleculeSettings.geometry.begin(),
+        moleculeSettings.geometry.end(),
+        -moleculeSettings.charge,
+        [](size_t acc, const Atom& atom) { return acc + atom.atomicNumber; }
+    );
+
+    bool unrestricted = scfSettings.scfOptions.unrestricted;
+    if (!scfSettings.optionsSet[UNRESTRICTED])
+    {
+        unrestricted = (moleculeSettings.multiplicity != 1);
+    }
+
+    if (scfSettings.optionsSet[UNRESTRICTED])
+    {
+        if (!scfSettings.scfOptions.unrestricted && moleculeSettings.multiplicity != 1)
+            errors.emplace_back(
+                "Multiplicity set to " + std::to_string(moleculeSettings.multiplicity)
+                + " but the SCF method is restricted (RHF). Set multiplicity to 1 or use unrestricted (UHF) method."
+            );
+    }
+
+    if (scfSettings.scfOptions.guessMix > 0 && !unrestricted)
+        errors.emplace_back("The guess_mix option can only be used with unrestricted calculations.");
+
+    if (electronCount + 1 < moleculeSettings.multiplicity || (electronCount - moleculeSettings.multiplicity) % 2 == 0)
+        errors.emplace_back("Invalid combination of charge and multiplicity.");
+
+    // --- Warnings ---
+    if (scfSettings.optionsSet[DIIS_MAX_SIZE] && !scfSettings.scfOptions.useDIIS)
+        warnings.emplace_back("DIIS_SIZE is set, but it will have no effect because diis is disabled.");
+    if (scfSettings.optionsSet[DIIS_ERROR_TOL] && !scfSettings.scfOptions.useDIIS)
+        warnings.emplace_back("DIIS_TOL is set, but it will have no effect because diis is disabled.");
+    if (scfSettings.optionsSet[MAX_DAMP_CYCLES] && scfSettings.scfOptions.damp == 0)
+        warnings.emplace_back("MAX_DAMP_CYCLES is set, but it will have no effect because damping is off.");
+    if (scfSettings.optionsSet[STOP_DAMP_THRESH] && scfSettings.scfOptions.damp == 0)
+        warnings.emplace_back("STOP_DAMP_THRESH is set, but it will have no effect because damping is off.");
+    if (scfSettings.optionsSet[DENSITY_THRESH] && !scfSettings.scfOptions.direct)
+        warnings.emplace_back("DENSITY_THRESH is set, but it will have no effect because direct SCF is not enabled.");
+    if (scfSettings.optionsSet[SYMMETRY_TOL] && !scfSettings.scfOptions.useSymmetry)
+        warnings.emplace_back("SYMMETRY_TOL is set, but it will have no effect because symmetry is not enabled.");
+    if (scfSettings.optionsSet[LSHIFT_GAP_TOL] && scfSettings.scfOptions.levelShift == 0)
+        warnings.emplace_back("LSHIFT_GAP_TOL is set, but it will have no effect because level shifting is off.");
+    if (scfSettings.optionsSet[MAX_LSHIFT_CYCLES] && scfSettings.scfOptions.levelShift == 0)
+        warnings.emplace_back("MAX_LSHIFT_CYCLES is set, but it will have no effect because level shifting is off.");
+    if (scfSettings.optionsSet[STOP_LSHIFT_THRESH] && scfSettings.scfOptions.levelShift == 0)
+        warnings.emplace_back("STOP_LSHIFT_THRESH is set, but it will have no effect because level shifting is off.");
+
+    std::string lowercaseName = basisSettings.basisName;
+    std::transform(
+        lowercaseName.begin(),
+        lowercaseName.end(),
+        lowercaseName.begin(),
+        [](unsigned char c) { return std::tolower(c); }
+    );
+    std::string basisPath = "basis_sets/" + lowercaseName + ".json";
+    if (!std::filesystem::exists(basisPath))
+    {
+        throw std::runtime_error("Basis set '" + basisSettings.basisName + "' not found.");
+    }
+
+    if (!errors.empty())
+    {
+        std::string errorMessage = "INPUT ERROR:\n";
+        for (const auto& error : errors) { errorMessage += "- " + error + "\n"; }
+        throw std::runtime_error(errorMessage);
+    }
 }

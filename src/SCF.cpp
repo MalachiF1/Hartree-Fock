@@ -41,6 +41,8 @@ void SCF::run()
         width += 15;
     if (this->options.damp > 0)
         width += 15;
+    if (this->options.levelShift > 0)
+        width += 15;
     std::stringstream ss;
     ss << "\n";
     for (size_t i = 0; i < width; ++i) ss << "-";
@@ -99,6 +101,22 @@ void SCF::run()
         if (this->deltaE < this->options.energyTol && this->deltaD < this->options.densityTol
             && (!this->options.useDIIS || diis_handler->getErrorNorm() < this->options.DIISErrorTol))
         {
+            // Remove the level shift from the virtual eigenvalues
+            if (this->useLevelShiftingAlpha)
+            {
+                for (size_t i = this->occupiedCountAlpha; i < this->basisCount; ++i)
+                {
+                    this->eigenvalues_alpha(i) -= this->options.levelShift;
+                }
+            }
+            if (this->useLevelShiftingBeta)
+            {
+                for (size_t i = this->occupiedCountBeta; i < this->basisCount; ++i)
+                {
+                    this->eigenvalues_beta(i) -= this->options.levelShift;
+                }
+            }
+
             // basis If converged, print the final results and exit.
             this->output->writeSeperator('-', width);
             this->printFinalResults(true);
@@ -107,6 +125,23 @@ void SCF::run()
     }
 
     // If the loop finishes, the calculation did not converge.
+
+    // Remove the level shift from the virtual eigenvalues
+    if (this->useLevelShiftingAlpha)
+    {
+        for (size_t i = this->occupiedCountAlpha; i < this->basisCount; ++i)
+        {
+            this->eigenvalues_alpha(i) -= this->options.levelShift;
+        }
+    }
+    if (this->useLevelShiftingBeta)
+    {
+        for (size_t i = this->occupiedCountBeta; i < this->basisCount; ++i)
+        {
+            this->eigenvalues_beta(i) -= this->options.levelShift;
+        }
+    }
+
     this->output->writeSeperator('-', width);
     this->printFinalResults(false);
 }
@@ -436,8 +471,44 @@ void SCF::buildFockMatrix(double schwartzThreshold, double densityThreshold)
 
 void SCF::diagonalizeAndUpdate()
 {
+    // Check whether to use damping.
+    if (this->options.damp > 0 && this->options.maxDampIter != 0 && this->options.maxDampIter > this->iteration
+        && (this->deltaE > this->options.stopDampThresh || this->iteration == 0))
+    {
+        this->dampCoeff = static_cast<double>(this->options.damp) / 100;
+    }
+    else
+    {
+        this->dampCoeff = 0;
+    }
+
+    // Check whether to use level shifting.
+    if (this->options.levelShift > 0 && this->iteration < this->options.maxLshiftIter
+        && (this->deltaE > this->options.stopLshiftThresh || this->iteration == 0))
+    {
+        double alphaHomoLumoGap = this->eigenvalues_alpha(this->occupiedCountAlpha)
+                                - this->eigenvalues_alpha(this->occupiedCountAlpha - 1);
+        double betaHomoLumoGap = this->eigenvalues_beta(this->occupiedCountBeta)
+                               - this->eigenvalues_beta(this->occupiedCountBeta - 1);
+        this->useLevelShiftingAlpha = alphaHomoLumoGap < this->options.lshiftGapTol;
+        this->useLevelShiftingBeta  = betaHomoLumoGap < this->options.lshiftGapTol;
+    }
+    else
+    {
+        this->useLevelShiftingAlpha = false;
+        this->useLevelShiftingBeta  = false;
+    }
+
     // Transform the Fock matrix to the orthogonal basis.
     Eigen::MatrixXd F_alpha_prime = this->X.transpose() * this->F_alpha * this->X;
+
+    // Apply level shifting
+    if (this->useLevelShiftingAlpha)
+    {
+        Eigen::MatrixXd shift = Eigen::MatrixXd::Zero(this->basisCount, this->basisCount);
+        for (size_t i = this->occupiedCountAlpha; i < this->basisCount; ++i) { shift(i, i) = this->options.levelShift; }
+        F_alpha_prime += this->X * this->S * this->C_alpha * shift * (this->X * this->S * this->C_alpha).transpose();
+    }
 
     // Diagonalize the Fock matrix.
     Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> alpha_solver(F_alpha_prime);
@@ -447,23 +518,29 @@ void SCF::diagonalizeAndUpdate()
     // Form the new density matrix from the occupied orbitals.
     Eigen::MatrixXd C_alpha_occ = this->C_alpha.leftCols(this->occupiedCountAlpha);
 
-    double a = 0; // damping factor
-    if (this->options.damp > 0 && this->options.maxDampIter != 0 && this->options.maxDampIter > this->iteration
-        && this->deltaE > this->options.stopDampThresh)
-    {
-        a = static_cast<double>(this->options.damp) / 100;
-    }
+    // Form the new density matrix with damping (the damping coefficient can be zero).
+    this->D_alpha = (1 - this->dampCoeff) * C_alpha_occ * C_alpha_occ.transpose() + this->dampCoeff * this->D_alpha;
 
-    this->D_alpha = (1 - a) * C_alpha_occ * C_alpha_occ.transpose() + a * this->D_alpha;
-
+    // Deal with beta spin if unrestricted.
     if (this->options.unrestricted)
     {
         Eigen::MatrixXd F_beta_prime = this->X.transpose() * this->F_beta * this->X;
+
+        if (this->useLevelShiftingBeta)
+        {
+            Eigen::MatrixXd shift = Eigen::MatrixXd::Zero(this->basisCount, this->basisCount);
+            for (size_t i = this->occupiedCountBeta; i < this->basisCount; ++i)
+            {
+                shift(i, i) = this->options.levelShift;
+            }
+            F_beta_prime += this->X * this->S * this->C_beta * shift * (this->X * this->S * this->C_beta).transpose();
+        }
+
         Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> beta_solver(F_beta_prime);
         this->C_beta               = this->X * beta_solver.eigenvectors();
         this->eigenvalues_beta     = beta_solver.eigenvalues();
         Eigen::MatrixXd C_beta_occ = this->C_beta.leftCols(this->occupiedCountBeta);
-        this->D_beta               = (1 - a) * C_beta_occ * C_beta_occ.transpose() + a * this->D_beta;
+        this->D_beta = (1 - this->dampCoeff) * C_beta_occ * C_beta_occ.transpose() + this->dampCoeff * this->D_beta;
     }
     else
     {
@@ -524,12 +601,17 @@ void SCF::printIteration() const
     if (this->options.useDIIS)
         ss << centerDouble(this->DIISError, 15);
 
-    if (this->options.damp > 0 && this->options.maxDampIter != 0 && this->options.maxDampIter > this->iteration
-        && this->deltaE > this->options.stopDampThresh)
+    if (this->dampCoeff > 0)
     {
         std::stringstream dampSS;
         dampSS << "damp: " << std::fixed << std::setprecision(2) << static_cast<double>(this->options.damp) / 100;
         ss << centerStr(dampSS.str(), 15);
+    }
+    if (this->useLevelShiftingAlpha || this->useLevelShiftingBeta)
+    {
+        std::stringstream lshiftSS;
+        lshiftSS << "lshift: " << std::fixed << std::setprecision(4) << this->options.levelShift;
+        ss << centerStr(lshiftSS.str(), 15);
     }
     ss << std::endl;
 
@@ -785,16 +867,31 @@ std::string SCF::printJobSpec() const
     if (this->options.guessMix > 0)
     {
         ss << "Requested " << this->options.guessMix * 10 << "% mixing of HOMO and LUMO orbitals in initial guess.\n";
+        ss << std::endl;
     }
     if (this->options.damp > 0)
     {
         ss << "Damping enbaled. Mixing coefficient set to: " << std::fixed << std::setprecision(2)
            << static_cast<double>(this->options.damp) / 100 << "\n";
-        if (this->options.maxDampIter != 0)
-            ss << "Damping will stop after itteration " << this->options.maxDampIter << "\n";
+        if (this->options.maxDampIter < this->options.maxIter)
+            ss << "Damping will stop after iteration " << this->options.maxDampIter << "\n";
         if (this->options.stopDampThresh != 0)
             ss << "Damping will stop once ΔE < " << std::scientific << std::setprecision(6)
                << this->options.stopDampThresh << "\n";
+        ss << std::endl;
+    }
+    if (options.levelShift > 0)
+    {
+        ss << "Level-shifting enabled. Level-shift set to: " << std::fixed << std::setprecision(4)
+           << this->options.levelShift << "\n";
+        if (this->options.maxLshiftIter < this->options.maxLshiftIter)
+            ss << "Level-shifting will stop after iteration " << this->options.maxLshiftIter << "\n";
+        if (this->options.stopLshiftThresh > 0)
+            ss << "Level-shifting will stop once ΔE < " << std::scientific << std::setprecision(6)
+               << this->options.stopLshiftThresh << "\n";
+        if (!std::isinf(this->options.lshiftGapTol))
+            ss << "Level-shifting will be applied when the HOMO-LUMO gap is less than " << std::fixed
+               << std::setprecision(6) << this->options.lshiftGapTol << "\n";
         ss << std::endl;
     }
 

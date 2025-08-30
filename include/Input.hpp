@@ -48,6 +48,10 @@ class Input
         DAMP,
         MAX_DAMP_CYCLES,
         STOP_DAMP_THRESH,
+        LEVEL_SHIFT,
+        LSHIFT_GAP_TOL,
+        MAX_LSHIFT_CYCLES,
+        STOP_LSHIFT_THRESH,
         COUNT // number of options
     };
 
