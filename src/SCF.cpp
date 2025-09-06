@@ -134,10 +134,13 @@ void SCF::run()
 
 void SCF::initialize(double schwartzThreshold, bool direct)
 {
+
     // Set constant parameters.
     this->basisCount         = molecule->getBasisFunctionCount();
     this->occupiedCountAlpha = (molecule->getElectronCount() + molecule->getMultiplicity() - 1) / 2;
     this->occupiedCountBeta  = (molecule->getElectronCount() - molecule->getMultiplicity() + 1) / 2;
+
+    this->output->write(printJobSpec());
 
     // Calculate one-electron integrals and nuclear repulsion.
     this->nuclearEnergy = molecule->nuclearRepulsion();
@@ -154,8 +157,6 @@ void SCF::initialize(double schwartzThreshold, bool direct)
         this->Vee = molecule->electronRepulsionTensor(schwartzThreshold);
     else // If using direct method, only pre-calculate the Schwartz screening matrix.
         this->Q = molecule->schwartzScreeningMatrix();
-
-    this->output->write(printJobSpec());
 }
 
 
@@ -436,7 +437,7 @@ void SCF::buildFockMatrix(double schwartzThreshold, double densityThreshold)
                 }
             }
         }
-#pragma omp critical (build_fock_direct)
+#pragma omp critical(build_fock_direct)
         {
             // Accumulate the thread-local matrices into the global ones.
             J += J_p;
@@ -771,7 +772,7 @@ std::string SCF::printJobSpec() const
     if (this->options.useDIIS)
     {
         ss << fmt::format(
-            "DIIS enabled.\nSize of DIIS history: {}\nDIIS error threshold: {:.6e}.\n\n",
+            "DIIS enabled.\nSize of DIIS history: {}.\nDIIS error threshold: {:.6e}.\n\n",
             this->options.DIISmaxSize,
             this->options.DIISErrorTol
         );
@@ -813,16 +814,13 @@ std::string SCF::printJobSpec() const
     for (const auto& atom : this->molecule->getGeometry())
     {
         ss << fmt::format(
-            "\t{: <2} {: >3} {: >13.8f} {: >13.8f} {: >13.8f}\n",
+            "\t{: <2} {: >13.8f} {: >13.8f} {: >13.8f}\n",
             Utils::atomicNumberToName.at(atom.atomicNumber),
-            atom.atomicNumber,
             atom.coords.x(),
             atom.coords.y(),
             atom.coords.z()
         );
     }
-    if (this->options.useSymmetry)
-        ss << fmt::format("Point Group: {}.\n", this->molecule->getPointGroup().toString());
 
     return ss.str();
 }

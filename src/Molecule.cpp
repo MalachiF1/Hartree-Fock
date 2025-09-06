@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <cstdlib>
 #include <fmt/core.h>
+#include <fmt/ostream.h>
 #include <fmt/ranges.h>
 #include <ranges>
 #include <sstream>
@@ -21,17 +22,16 @@ Molecule::Molecule(
 
     if (detectSymmetry)
     {
-        auto newGeometry                       = Symmetry::translateCOMToOrigin(geometry);
-        auto [principalMoments, principalAxes] = Symmetry::diagonalizeInertiaTensor(newGeometry);
-        PointGroup pointGroup = Symmetry::classifyPointGroup(newGeometry, principalMoments, symmetryTolerance);
-        Symmetry::alignCanonically(newGeometry, pointGroup, principalMoments, principalAxes, symmetryTolerance);
-        this->pointGroup = pointGroup;
-        this->geometry   = newGeometry;
+        this->geometry = geometry;
+        Symmetry::translateOrigin(this->geometry, Symmetry::findCOM(this->geometry));
+
+        auto SEAs = Symmetry::findSEAs(this->geometry, symmetryTolerance);
+        auto [symbol, paxis, saxis] = Symmetry::findPointGroup(this->geometry, symmetryTolerance);
+        Symmetry::rotateToNewAxes(this->geometry, saxis, paxis.cross(saxis), paxis);
     }
     else
     {
-        this->geometry   = geometry;
-        this->pointGroup = PointGroup(PointGroup::C1, 1, {SymmetryOperation::Identity()});
+        this->geometry = geometry;
     }
 
     buildBasis(basisName);
@@ -43,7 +43,7 @@ std::string Molecule::toString() const
 {
     return fmt::format(
         "Molecule with charge {} and multiplicity {}:\nNumber of electrons: {}\nNumber of basis functions: "
-        "{}\nGeometry (atom, x, y, z):\n{}Point Group: {}\n",
+        "{}\nGeometry (atom, x, y, z):\n{}",
         charge,
         multiplicity,
         electronCount,
@@ -64,8 +64,7 @@ std::string Molecule::toString() const
                     }
                 ),
             ""
-        ),
-        pointGroup.toString()
+        )
     );
 }
 

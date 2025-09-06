@@ -1,13 +1,10 @@
 #pragma once
 
 #include "AtomicOrbital.hpp"
-#include "Symmetry/PointGroup.hpp"
 #include "Utils.hpp"
 
 #include <string>
-#include <system_error>
 #include <vector>
-
 
 /**
  * @brief Represents the electron repulsion tensor for a molecule.
@@ -195,7 +192,8 @@ class Molecule
     double getSymmetryTol() const { return symmetryTolerance; }
     size_t getElectronCount() const { return electronCount; }
     const std::vector<Atom>& getGeometry() const { return geometry; }
-    const PointGroup& getPointGroup() const { return pointGroup; }
+    // const PointGroup& getPointGroup() const { return pointGroup; }
+    // const PointGroup& getAbelianSubgroup() const { return abelianSubgroup; }
     std::vector<std::string> getAOLabels() const;
 
   private:
@@ -221,5 +219,6 @@ class Molecule
     std::vector<Atom> geometry;
     size_t electronCount;
     std::vector<AtomicOrbital> atomicOrbitals;
-    PointGroup pointGroup;
+    // PointGroup pointGroup;
+    // PointGroup abelianSubgroup;
 };
