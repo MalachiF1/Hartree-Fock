@@ -106,42 +106,36 @@ int fact(int n)
     return result;
 }
 
+namespace
+{
+double SQRT_PI_BY_2 = std::sqrt(M_PI) / 2.0;
+}
+
 double boys(int m, double T)
 {
-    double result;
+    // boys_call_count++;
 
     if (T < 1e-9)
     {
         // For small T, use the series expansion for stability.
         // F_m(T) = 1/(2m+1) - T/(2m+3) + ...
-        result = 1.0 / (2.0 * m + 1.0);
+        return 1.0 / (2.0 * m + 1.0);
     }
-    else
+
+    if (T > 30.0)
     {
-        // Calculate the base case, F_0(T), using the error function.
-        // F_0(T) = (sqrt(pi) / 2*sqrt(T)) * erf(sqrt(T))
-        double sqrt_T = std::sqrt(T);
-        double F0     = (std::sqrt(M_PI) / (2.0 * sqrt_T)) * std::erf(sqrt_T);
+        // For large T, use the asymptotic expansion.
+        double F_i = SQRT_PI_BY_2 / std::sqrt(T);
 
-        if (m == 0)
-        {
-            result = F0;
-        }
-        else
-        {
-            // Use the upward recurrence relation to get F_m(T) from F_0(T).
-            // F_{i+1}(T) = ( (2i+1)F_i(T) - exp(-T) ) / (2T)
-            double F_i = F0; // Start with F_0
-            for (int i = 0; i < m; ++i)
-            {
-                double F_i_plus_1 = ((2.0 * i + 1.0) * F_i - std::exp(-T)) / (2.0 * T);
-                F_i               = F_i_plus_1;
-            }
-            result = F_i;
-        }
+        for (int i = 0; i < m; ++i) { F_i = (i + 0.5) * F_i / T; }
+        return F_i;
     }
 
-    return result;
+    // Use the upward recursion relation.
+    double sqrt_T = std::sqrt(T);
+    double F_i    = SQRT_PI_BY_2 * std::erf(sqrt_T) / sqrt_T;
+    for (int i = 0; i < m; ++i) { F_i = ((2.0 * i + 1.0) * F_i - std::exp(-T)) / (2.0 * T); }
+    return F_i;
 }
 
 

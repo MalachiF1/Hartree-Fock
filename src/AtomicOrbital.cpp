@@ -44,20 +44,42 @@ bool AtomicOrbital::operator==(const AtomicOrbital& other) const
     return primitives1 == primitives2;
 }
 
+
+bool AtomicOrbital::sameSubshell(const AtomicOrbital& ao1, const AtomicOrbital& ao2)
+{
+    if (ao1.angularMomentum.sum() != ao2.angularMomentum.sum())
+        return false;
+
+    std::vector<std::pair<double, double>> exponentCoeffPairs1;
+    std::vector<std::pair<double, double>> exponentCoeffPairs2;
+
+    for (const auto& primitive : ao1.getPrimitives())
+        exponentCoeffPairs1.emplace_back(primitive.exponent, primitive.coeff);
+    for (const auto& primitive : ao2.getPrimitives())
+        exponentCoeffPairs2.emplace_back(primitive.exponent, primitive.coeff);
+
+    std::ranges::sort(exponentCoeffPairs1);
+    std::ranges::sort(exponentCoeffPairs2);
+
+
+    return exponentCoeffPairs1 == exponentCoeffPairs2;
+}
+
+
 double AtomicOrbital::overlap(const AtomicOrbital& ao1, const AtomicOrbital& ao2)
 {
+    int l1 = ao1.angularMomentum.x();
+    int m1 = ao1.angularMomentum.y();
+    int n1 = ao1.angularMomentum.z();
+    int l2 = ao2.angularMomentum.x();
+    int m2 = ao2.angularMomentum.y();
+    int n2 = ao2.angularMomentum.z();
+
     double total_overlap = 0.0;
     for (const auto& p1 : ao1.primitives)
     {
         for (const auto& p2 : ao2.primitives)
         {
-            int l1 = p1.angularMomentum.x();
-            int m1 = p1.angularMomentum.y();
-            int n1 = p1.angularMomentum.z();
-            int l2 = p2.angularMomentum.x();
-            int m2 = p2.angularMomentum.y();
-            int n2 = p2.angularMomentum.z();
-
             double p = p1.exponent + p2.exponent;
             double q = (p1.exponent * p2.exponent) / p;
             Vec3 Q   = p1.coords - p2.coords;
@@ -77,17 +99,18 @@ double AtomicOrbital::overlap(const AtomicOrbital& ao1, const AtomicOrbital& ao2
 double AtomicOrbital::kinetic(const AtomicOrbital& ao1, const AtomicOrbital& ao2)
 {
     double total_kinetic = 0.0;
+
+    int l1 = ao1.angularMomentum.x();
+    int m1 = ao1.angularMomentum.y();
+    int n1 = ao1.angularMomentum.z();
+    int l2 = ao2.angularMomentum.x();
+    int m2 = ao2.angularMomentum.y();
+    int n2 = ao2.angularMomentum.z();
+
     for (const auto& p1 : ao1.primitives)
     {
         for (const auto& p2 : ao2.primitives)
         {
-            int l1 = p1.angularMomentum.x();
-            int m1 = p1.angularMomentum.y();
-            int n1 = p1.angularMomentum.z();
-            int l2 = p2.angularMomentum.x();
-            int m2 = p2.angularMomentum.y();
-            int n2 = p2.angularMomentum.z();
-
             double p = p1.exponent + p2.exponent;
             double q = (p1.exponent * p2.exponent) / p;
             Vec3 Q   = p1.coords - p2.coords;
@@ -123,16 +146,24 @@ double AtomicOrbital::kinetic(const AtomicOrbital& ao1, const AtomicOrbital& ao2
 double AtomicOrbital::nuclearAttraction(const AtomicOrbital& ao1, const AtomicOrbital& ao2, const Vec3& nucleusCoords)
 {
     double total_attraction = 0.0;
+
+    int l1 = ao1.angularMomentum.x();
+    int m1 = ao1.angularMomentum.y();
+    int n1 = ao1.angularMomentum.z();
+    int l2 = ao2.angularMomentum.x();
+    int m2 = ao2.angularMomentum.y();
+    int n2 = ao2.angularMomentum.z();
+
+    int max_t = l1 + l2;
+    int max_u = m1 + m2;
+    int max_v = n1 + n2;
+    RCache RCache(max_t, max_u, max_v);
+
     for (const auto& p1 : ao1.primitives)
     {
         for (const auto& p2 : ao2.primitives)
         {
-            int l1 = p1.angularMomentum.x();
-            int m1 = p1.angularMomentum.y();
-            int n1 = p1.angularMomentum.z();
-            int l2 = p2.angularMomentum.x();
-            int m2 = p2.angularMomentum.y();
-            int n2 = p2.angularMomentum.z();
+            RCache.clear();
 
             double p = p1.exponent + p2.exponent;
             Vec3 P   = (p1.exponent * p1.coords + p2.exponent * p2.coords) / p;
@@ -149,8 +180,9 @@ double AtomicOrbital::nuclearAttraction(const AtomicOrbital& ao1, const AtomicOr
                 {
                     for (int v = 0; v <= n1 + n2; ++v)
                     {
-                        sum += E(t, l1, l2, Q.x(), p1.exponent, p2.exponent) * E(u, m1, m2, Q.y(), p1.exponent, p2.exponent)
-                             * E(v, n1, n2, Q.z(), p1.exponent, p2.exponent) * R(t, u, v, 0, p, PC, p * PC.squaredNorm());
+                        sum += E(t, l1, l2, Q.x(), p1.exponent, p2.exponent)
+                             * E(u, m1, m2, Q.y(), p1.exponent, p2.exponent) * E(v, n1, n2, Q.z(), p1.exponent, p2.exponent)
+                             * R(t, u, v, 0, p, PC, p * PC.squaredNorm(), RCache);
                     }
                 }
             }
@@ -168,27 +200,40 @@ double AtomicOrbital::electronRepulsion(
 )
 {
     double total_repulsion = 0.0;
+
+    int l1 = ao1.angularMomentum.x();
+    int m1 = ao1.angularMomentum.y();
+    int n1 = ao1.angularMomentum.z();
+    int l2 = ao2.angularMomentum.x();
+    int m2 = ao2.angularMomentum.y();
+    int n2 = ao2.angularMomentum.z();
+    int l3 = ao3.angularMomentum.x();
+    int m3 = ao3.angularMomentum.y();
+    int n3 = ao3.angularMomentum.z();
+    int l4 = ao4.angularMomentum.x();
+    int m4 = ao4.angularMomentum.y();
+    int n4 = ao4.angularMomentum.z();
+
+    int max_t = l1 + l2 + l3 + l4;
+    int max_u = m1 + m2 + m3 + m4;
+    int max_v = n1 + n2 + n3 + n4;
+    RCache RCache(max_t, max_u, max_v);
+
     for (const auto& p1 : ao1.primitives)
     {
         for (const auto& p2 : ao2.primitives)
         {
-            int l1 = p1.angularMomentum.x();
-            int m1 = p1.angularMomentum.y();
-            int n1 = p1.angularMomentum.z();
-            int l2 = p2.angularMomentum.x();
-            int m2 = p2.angularMomentum.y();
-            int n2 = p2.angularMomentum.z();
 
             double p_ab = p1.exponent + p2.exponent;
             Vec3 P_ab   = (p1.exponent * p1.coords + p2.exponent * p2.coords) / p_ab;
             double q_ab = (p1.exponent * p2.exponent) / p_ab;
             Vec3 Q_ab   = p1.coords - p2.coords;
 
-            // precompute E values so we don't recompute them in the nested loops
             std::vector<double> Ex1_values(l1 + l2 + 1);
             std::vector<double> Ey1_values(m1 + m2 + 1);
             std::vector<double> Ez1_values(n1 + n2 + 1);
 
+            // precompute E values so we don't recompute them in the nested loops
             for (int t1 = 0; t1 <= l1 + l2; ++t1) Ex1_values[t1] = E(t1, l1, l2, Q_ab.x(), p1.exponent, p2.exponent);
             for (int u1 = 0; u1 <= m1 + m2; ++u1) Ey1_values[u1] = E(u1, m1, m2, Q_ab.y(), p1.exponent, p2.exponent);
             for (int v1 = 0; v1 <= n1 + n2; ++v1) Ez1_values[v1] = E(v1, n1, n2, Q_ab.z(), p1.exponent, p2.exponent);
@@ -197,12 +242,7 @@ double AtomicOrbital::electronRepulsion(
             {
                 for (const auto& p4 : ao4.primitives)
                 {
-                    int l3 = p3.angularMomentum.x();
-                    int m3 = p3.angularMomentum.y();
-                    int n3 = p3.angularMomentum.z();
-                    int l4 = p4.angularMomentum.x();
-                    int m4 = p4.angularMomentum.y();
-                    int n4 = p4.angularMomentum.z();
+                    RCache.clear();
 
                     double p_cd = p3.exponent + p4.exponent;
                     Vec3 P_cd   = (p3.exponent * p3.coords + p4.exponent * p4.coords) / p_cd;
@@ -237,7 +277,6 @@ double AtomicOrbital::electronRepulsion(
                             for (int v1 = 0; v1 <= n1 + n2; ++v1)
                             {
                                 double Ez1 = Ez1_values[v1];
-
                                 for (int t2 = 0; t2 <= l3 + l4; ++t2)
                                 {
                                     double Ex2 = Ex2_values[t2];
@@ -247,17 +286,15 @@ double AtomicOrbital::electronRepulsion(
                                         for (int v2 = 0; v2 <= n3 + n4; ++v2)
                                         {
                                             double Ez2 = Ez2_values[v2];
-
-                                            double R_val = R(t1 + t2, u1 + u2, v1 + v2, 0, delta_eri, P_ab - P_cd, T);
-
-                                            sum += Ex1 * Ey1 * Ez1 * Ex2 * Ey2 * Ez2 * std::pow(-1.0, t2 + u2 + v2) * R_val;
+                                            double R_val = R(t1 + t2, u1 + u2, v1 + v2, 0, delta_eri, P_ab - P_cd, T, RCache);
+                                            int signFactor = (t2 + u2 + v2) % 2 == 0 ? 1 : -1;
+                                            sum += Ex1 * Ey1 * Ez1 * Ex2 * Ey2 * Ez2 * signFactor * R_val;
                                         }
                                     }
                                 }
                             }
                         }
                     }
-
                     total_repulsion += p1.normConst * p2.normConst * p3.normConst * p4.normConst * p1.coeff * p2.coeff
                                      * p3.coeff * p4.coeff * prefactor * sum;
                 }
@@ -269,7 +306,7 @@ double AtomicOrbital::electronRepulsion(
 
 double AtomicOrbital::E(int i, int l1, int l2, double Q, double exponentA, double exponentB)
 {
-    if (i < 0 || i > (l1 + l2))
+    if (i < 0 || i > (l1 + l2) || l1 < 0 || l2 < 0)
     {
         // out out bounds
         return 0.0;
@@ -302,13 +339,16 @@ double AtomicOrbital::E(int i, int l1, int l2, double Q, double exponentA, doubl
     return result;
 }
 
-double AtomicOrbital::R(int t, int u, int v, int n, double p, const Vec3& PC, double T)
+double AtomicOrbital::R(int t, int u, int v, int n, double p, const Vec3& PC, double T, RCache& cache)
 {
     if (t < 0 || u < 0 || v < 0)
     {
-        // out of bounds
         return 0.0;
     }
+
+    double cachedValue = cache(t, u, v, n);
+    if (cachedValue > -0.5) // Use -1.0 as the sentinel value
+        return cachedValue;
 
     double result = 0.0;
     if (t == 0 && u == 0 && v == 0)
@@ -318,37 +358,16 @@ double AtomicOrbital::R(int t, int u, int v, int n, double p, const Vec3& PC, do
     }
     else if (t > 0)
     {
-        result = (t - 1) * R(t - 2, u, v, n + 1, p, PC, T) + PC.x() * R(t - 1, u, v, n + 1, p, PC, T);
+        result = (t - 1) * R(t - 2, u, v, n + 1, p, PC, T, cache) + PC.x() * R(t - 1, u, v, n + 1, p, PC, T, cache);
     }
     else if (u > 0)
     {
-        result = (u - 1) * R(t, u - 2, v, n + 1, p, PC, T) + PC.y() * R(t, u - 1, v, n + 1, p, PC, T);
+        result = (u - 1) * R(t, u - 2, v, n + 1, p, PC, T, cache) + PC.y() * R(t, u - 1, v, n + 1, p, PC, T, cache);
     }
     else // v > 0
     {
-        result = (v - 1) * R(t, u, v - 2, n + 1, p, PC, T) + PC.z() * R(t, u, v - 1, n + 1, p, PC, T);
+        result = (v - 1) * R(t, u, v - 2, n + 1, p, PC, T, cache) + PC.z() * R(t, u, v - 1, n + 1, p, PC, T, cache);
     }
 
-    return result;
-}
-
-
-bool AtomicOrbital::sameSubshell(const AtomicOrbital& ao1, const AtomicOrbital& ao2)
-{
-    if (ao1.angularMomentum.sum() != ao2.angularMomentum.sum())
-        return false;
-
-    std::vector<std::pair<double, double>> exponentCoeffPairs1;
-    std::vector<std::pair<double, double>> exponentCoeffPairs2;
-
-    for (const auto& primitive : ao1.getPrimitives())
-        exponentCoeffPairs1.emplace_back(primitive.exponent, primitive.coeff);
-    for (const auto& primitive : ao2.getPrimitives())
-        exponentCoeffPairs2.emplace_back(primitive.exponent, primitive.coeff);
-
-    std::ranges::sort(exponentCoeffPairs1);
-    std::ranges::sort(exponentCoeffPairs2);
-
-
-    return exponentCoeffPairs1 == exponentCoeffPairs2;
+    return cache(t, u, v, n) = result;
 }

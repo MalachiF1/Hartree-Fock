@@ -323,7 +323,7 @@ ElectronRepulsionTensor Molecule::electronRepulsionTensor(double threshold) cons
             double integral = AtomicOrbital::electronRepulsion(
                 atomicOrbitals[i], atomicOrbitals[j], atomicOrbitals[i], atomicOrbitals[j]
             );
-            Q(i, j) = Q(j, i) = std::sqrt(integral);
+            Q(i, j) = Q(j, i) = integral;
 
             // We can set these elements in the tensor instead of calculating them again in the next loop.
             // The ElectronRepulsionTensor class handles the symmetry
@@ -331,7 +331,7 @@ ElectronRepulsionTensor Molecule::electronRepulsionTensor(double threshold) cons
         }
     }
 
-#pragma omp parallel for collapse(4) schedule(dynamic, 1)
+#pragma omp parallel for collapse(4) schedule(dynamic, 64)
     for (size_t i = 0; i < N_ao; ++i)
     {
         for (size_t j = 0; j < N_ao; ++j)
@@ -349,13 +349,12 @@ ElectronRepulsionTensor Molecule::electronRepulsionTensor(double threshold) cons
                         continue;
 
                     // apply Schwartz screening at the AO level
-                    if (Q(i, j) * Q(k, l) < threshold)
+                    if (Q(i, j) * Q(k, l) < threshold * threshold)
                         continue;
 
                     double integral = AtomicOrbital::electronRepulsion(
                         atomicOrbitals[i], atomicOrbitals[j], atomicOrbitals[k], atomicOrbitals[l]
                     );
-
                     // Store with 8-fold symmetry
                     Vee(i, j, k, l) = integral;
                 }

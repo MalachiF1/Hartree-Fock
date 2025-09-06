@@ -91,6 +91,32 @@ class AtomicOrbital
      */
     static double E(int i, int l1, int l2, double Q, double exponentA, double exponentB);
 
+    struct RCache
+    {
+        size_t max_t;
+        size_t max_u;
+        size_t max_v;
+        size_t max_n;
+        std::vector<double> data;
+
+        RCache(size_t max_t, size_t max_u, size_t max_v) :
+            max_t(max_t),
+            max_u(max_u),
+            max_v(max_v),
+            max_n(max_t + max_u + max_v + 1),
+            data((max_t + 1) * (max_u + 1) * (max_v + 1) * max_n, -1.0)
+        {
+        }
+
+        double& operator()(size_t t, size_t u, size_t v, size_t n)
+        {
+            size_t index = n + (v * max_n) + (u * max_n * (max_v + 1)) + (t * (max_u + 1) * (max_v + 1) * max_n);
+            return data[index];
+        }
+
+        void clear() { std::ranges::fill(data, -1.0); }
+    };
+
     /**
      * Helper function for calculating the auxiliary integrals R_tuv.
      * Used for the electron-nuclear attraction and electron-electron repulsion integrals.
@@ -104,7 +130,7 @@ class AtomicOrbital
      * @param T The argument for Boys function, F_m(T).
      * @return The value of the auxiliary integral R_tuv.
      */
-    static double R(int t, int u, int v, int n, double p, const Vec3& PC, double T);
+    static double R(int t, int u, int v, int n, double p, const Vec3& PC, double T, RCache& cache);
 
     const std::vector<PrimitiveGaussian> primitives;
 };

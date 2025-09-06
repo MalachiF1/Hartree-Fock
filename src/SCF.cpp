@@ -285,7 +285,7 @@ void SCF::buildFockMatrix(double schwartzThreshold, double densityThreshold)
             K_beta_p = Eigen::MatrixXd::Zero(N_ao, N_ao);
 
 
-#pragma omp for collapse(4) schedule(dynamic, 1)
+#pragma omp for collapse(4) schedule(dynamic, 64)
         for (size_t i = 0; i < N_ao; ++i)
         {
             for (size_t j = 0; j < N_ao; ++j)
@@ -436,7 +436,7 @@ void SCF::buildFockMatrix(double schwartzThreshold, double densityThreshold)
                 }
             }
         }
-#pragma omp critical
+#pragma omp critical (build_fock_direct)
         {
             // Accumulate the thread-local matrices into the global ones.
             J += J_p;
