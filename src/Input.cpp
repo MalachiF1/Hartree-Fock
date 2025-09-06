@@ -188,6 +188,23 @@ Input::MoleculeSettings Input::parseMoleculeBlock(const std::string& moleculeBlo
     if (settings.geometry.empty())
         throw std::runtime_error("No atoms specified in $molecule block.");
 
+    // check for atoms with distance < 1e-4
+    for (size_t i = 0; i < settings.geometry.size(); ++i)
+    {
+        for (size_t j = i + 1; j < settings.geometry.size(); ++j)
+        {
+            double dist = (settings.geometry[i].coords - settings.geometry[j].coords).norm();
+            if (dist < 1e-4)
+            {
+                throw std::runtime_error(
+                    "Atoms " + std::to_string(i + 1) + " and " + std::to_string(j + 1)
+                    + " in $molecule block are too close together (distance < 1e-4)."
+                );
+            }
+        }
+    }
+
+
     return settings;
 }
 
@@ -503,7 +520,13 @@ void Input::validateSettings(
         return std::string(view.begin(), view.end());
     };
     std::string lowercaseName = toLowerString(basisSettings.basisName);
-    std::string basisPath     = "basis_sets/" + lowercaseName + ".json";
+    size_t startPos           = 0;
+    while ((startPos = lowercaseName.find("*", startPos)) != std::string::npos)
+    {
+        lowercaseName.replace(startPos, 1, "_st_");
+        startPos += 4;
+    }
+    std::string basisPath = "basis_sets/" + lowercaseName + ".json";
     if (!std::filesystem::exists(basisPath))
     {
         throw std::runtime_error("Basis set '" + basisSettings.basisName + "' not found.");
