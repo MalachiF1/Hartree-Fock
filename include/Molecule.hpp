@@ -1,6 +1,7 @@
 #pragma once
 
 #include "AtomicOrbital.hpp"
+#include "Basis.hpp"
 #include "Utils.hpp"
 
 #include <string>
@@ -219,6 +220,7 @@ class Molecule
     std::vector<Atom> geometry;
     size_t electronCount;
     std::vector<AtomicOrbital> atomicOrbitals;
+    Basis basis;
     // PointGroup pointGroup;
     // PointGroup abelianSubgroup;
 };

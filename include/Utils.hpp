@@ -37,21 +37,6 @@ extern const std::unordered_map<std::string, unsigned, CaseInsensitiveHash, Case
 } // namespace Utils
 
 /**
- * Struct to hold shell information from a basis set
- */
-struct Shell
-{
-    Shell() = default;
-    Shell(int angularMomentum, const std::vector<double>& exponents, const std::vector<double>& coefficients) :
-        angularMomentum(angularMomentum), exponents(exponents), coefficients(coefficients)
-    {
-    }
-    int angularMomentum;
-    std::vector<double> exponents;
-    std::vector<double> coefficients;
-};
-
-/**
  * Computes the double factorial of an integer n.
  * If n is -1, returns 1.
  *

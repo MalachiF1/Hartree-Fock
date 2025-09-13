@@ -2,6 +2,7 @@
 
 #include "Basis.hpp"
 #include "Eigen/Core"
+#include "IntegralEngine.hpp"
 #include "Symmetry/Symmetry.hpp"
 #include "Utils.hpp"
 
@@ -11,6 +12,8 @@
 #include <fmt/core.h>
 #include <fmt/ostream.h>
 #include <fmt/ranges.h>
+#include <iomanip>
+#include <iostream>
 #include <ranges>
 #include <sstream>
 
@@ -25,7 +28,7 @@ Molecule::Molecule(
         this->geometry = geometry;
         Symmetry::translateOrigin(this->geometry, Symmetry::findCOM(this->geometry));
 
-        auto SEAs = Symmetry::findSEAs(this->geometry, symmetryTolerance);
+        auto SEAs                   = Symmetry::findSEAs(this->geometry, symmetryTolerance);
         auto [symbol, paxis, saxis] = Symmetry::findPointGroup(this->geometry, symmetryTolerance);
         Symmetry::rotateToNewAxes(this->geometry, saxis, paxis.cross(saxis), paxis);
     }
@@ -34,9 +37,24 @@ Molecule::Molecule(
         this->geometry = geometry;
     }
 
+    this->electronCount = countElectrons();
     buildBasis(basisName);
-    this->electronCount      = countElectrons();
-    this->basisFunctionCount = atomicOrbitals.size();
+    this->basis              = Basis(basisName, this->geometry);
+    this->basisFunctionCount = this->basis.getAOCount();
+    fmt::println("Number of basis functions (original): {}", this->atomicOrbitals.size());
+    fmt::println("Number of basis functions (new): {}", this->basisFunctionCount);
+    fmt::println("Number of shells: {}", this->basis.getShellCount());
+    for (const auto& shell : this->basis.getShells()) { fmt::println("  {}", shell.toString()); }
+    fmt::print("Exponents ({}): ", this->basis.getExponents().size());
+    for (const auto& exp : this->basis.getExponents()) { fmt::print("{:.4f} ", exp); }
+    fmt::println("\nAngular momenta ({}): ", this->basis.getLx().size());
+    for (size_t i = 0; i < this->basis.getAOCount(); ++i)
+    {
+        fmt::print("({}, {}, {}) ", this->basis.getLx()[i], this->basis.getLy()[i], this->basis.getLz()[i]);
+    }
+    fmt::println("\nCoefficients ({}): ", this->basis.getCoefficients().size());
+    for (const auto& coeff : this->basis.getCoefficients()) { fmt::print("{:.4f} ", coeff); }
+    fmt::println("");
 }
 
 std::string Molecule::toString() const
@@ -209,7 +227,7 @@ void Molecule::buildBasis(const std::string& basisName)
             elements.push_back(atom.atomicNumber);
     }
 
-    auto basisData = Basis::getBasis(basisName, elements);
+    auto basisData = Basis::readBasis(basisName, elements);
 
     for (const auto& atom : geometry)
     {
@@ -267,6 +285,33 @@ Eigen::MatrixXd Molecule::overlapMatrix() const
             S(i, j) = S(j, i) = AtomicOrbital::overlap(atomicOrbitals[i], atomicOrbitals[j]);
         }
     }
+    std::cout << "Overlap matrix S:\n" << std::fixed << std::setprecision(6) << S << std::endl;
+
+    Eigen::MatrixXd S_test = Eigen::MatrixXd::Zero(basisFunctionCount, basisFunctionCount);
+    for (size_t i = 0; i < basis.getShellCount(); ++i)
+    {
+        for (size_t j = i; j < basis.getShellCount(); ++j) // only compute upper triangle as S is symmetric
+        {
+            IntegralEngine::overlap(basis, basis.getShells()[i], basis.getShells()[j], S_test);
+        }
+    }
+    for (size_t i = 0; i < basisFunctionCount; ++i)
+    {
+        for (size_t j = i; j < basisFunctionCount; ++j) { S_test(j, i) = S_test(i, j); }
+    }
+
+    for (size_t i = 0; i < basisFunctionCount; ++i)
+    {
+        for (size_t j = 0; j < basisFunctionCount; ++j)
+        {
+            if (std::abs(S_test(i, j)) > 5)
+            {
+                S_test(i, j) = 5;
+            }
+        }
+    }
+    std::cout << "\nOverlap matrix S_test:\n" << std::fixed << std::setprecision(6) << S_test << std::endl;
+
     return S;
 }
 

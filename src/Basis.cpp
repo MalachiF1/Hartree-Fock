@@ -1,24 +1,135 @@
 #include "Basis.hpp"
 
+#include "Utils.hpp"
+
 #include <charconv>
 #include <filesystem>
+#include <fmt/core.h>
 #include <fstream>
 #include <json.hpp>
 #include <sstream>
 #include <stdexcept>
 #include <string>
 
-std::map<int, std::vector<Shell>> Basis::getBasis(const std::string& name, const std::vector<int>& elements)
+std::string Shell::toString() const
 {
-    // convert name to lowercase for case-insensitive comparison
-    auto toLowerString = [](std::string_view sv) -> std::string
-    {
-        auto view = sv | std::ranges::views::transform(::tolower);
-        return std::string(view.begin(), view.end());
-    };
-    std::string lowercaseName = toLowerString(name);
+    return fmt::format(
+        "Shell(l={}, center=({:.4f}, {:.4f}, {:.4f}), nao={}, nprim={}, primOffset={}, aoOffset={}, coeffOffset={})",
+        l,
+        center.x(),
+        center.y(),
+        center.z(),
+        nao,
+        nprim,
+        primOffset,
+        aoOffset,
+        coeffOffset
+    );
+}
 
-    // replace '*' with '_st_'
+Basis::Basis(const std::string& name, const std::vector<Atom>& geometry) : name(name)
+{
+    std::vector<int> elements;
+    for (const auto& atom : geometry)
+    {
+        // Ensure that no duplicate atomic numbers are added to the elements vector.
+        if (std::ranges::find(elements, atom.atomicNumber) == elements.end())
+            elements.push_back(atom.atomicNumber);
+    }
+
+    std::map<int, std::vector<RawShell>> basisData = readBasis(name, elements);
+
+    size_t size = geometry.size() * 10;
+    this->exps.reserve(size);
+    this->coefficients.reserve(size);
+    this->cx.reserve(size);
+    this->cy.reserve(size);
+    this->cz.reserve(size);
+    this->lx.reserve(size);
+    this->ly.reserve(size);
+    this->lz.reserve(size);
+
+    size_t primOffset  = 0;
+    size_t aoOffset    = 0;
+    size_t coeffOffset = 0;
+    for (const auto& atom : geometry)
+    {
+        const auto& shellsForAtom = basisData.at(atom.atomicNumber);
+
+        for (const auto& rawShell : shellsForAtom)
+        {
+            this->shells.emplace_back(
+                rawShell.angularMomentum,
+                atom.coords,
+                (rawShell.angularMomentum + 1) * (rawShell.angularMomentum + 2) / 2,
+                rawShell.exponents.size(),
+                primOffset,
+                aoOffset,
+                coeffOffset
+            );
+            primOffset += rawShell.exponents.size();
+            aoOffset += (rawShell.angularMomentum + 1) * (rawShell.angularMomentum + 2) / 2;
+            coeffOffset += rawShell.exponents.size() * (rawShell.angularMomentum + 1) * (rawShell.angularMomentum + 2) / 2;
+
+            for (const auto& exp : rawShell.exponents)
+            {
+                this->exps.emplace_back(exp);
+                this->cx.emplace_back(atom.coords.x());
+                this->cy.emplace_back(atom.coords.y());
+                this->cz.emplace_back(atom.coords.z());
+            }
+
+
+            // For a given angular momentum L, generate all components (e.g., L=1 -> px, py, pz).
+            for (int i = rawShell.angularMomentum; i >= 0; --i)
+            {
+                for (int j = rawShell.angularMomentum - i; j >= 0; --j)
+                {
+                    int k = rawShell.angularMomentum - i - j;
+                    this->lx.emplace_back(i);
+                    this->ly.emplace_back(j);
+                    this->lz.emplace_back(k);
+                }
+            }
+
+            for (size_t l = 0; l < rawShell.exponents.size(); ++l)
+            {
+                for (int i = rawShell.angularMomentum; i >= 0; --i)
+                {
+                    for (int j = rawShell.angularMomentum - i; j >= 0; --j)
+                    {
+                        int k = rawShell.angularMomentum - i - j;
+
+                        double prefactor1  = std::pow(2.0 * rawShell.exponents[l] / M_PI, 0.75);
+                        double prefactor2  = std::pow(4.0 * rawShell.exponents[l], (i + j + k) / 2.0);
+                        double denominator = std::sqrt(dfact((2 * i) - 1) * dfact((2 * j) - 1) * dfact((2 * k) - 1));
+                        double normFactor  = prefactor1 * prefactor2 / denominator;
+
+                        this->coefficients.emplace_back(normFactor * rawShell.coefficients[l]);
+                    }
+                }
+            }
+        }
+    }
+    this->exps.shrink_to_fit();
+    this->coefficients.shrink_to_fit();
+    this->cx.shrink_to_fit();
+    this->cy.shrink_to_fit();
+    this->cz.shrink_to_fit();
+    this->lx.shrink_to_fit();
+    this->ly.shrink_to_fit();
+    this->lz.shrink_to_fit();
+    this->shells.shrink_to_fit();
+}
+
+
+std::map<int, std::vector<RawShell>> Basis::readBasis(const std::string& name, const std::vector<int>& elements)
+{
+    // Convert name to lowercase for case-insensitive comparison.
+    auto view          = name | std::ranges::views::transform(::tolower);
+    auto lowercaseName = std::string(view.begin(), view.end());
+
+    // Replace '*' with '_st_'.
     size_t startPos = 0;
     while ((startPos = lowercaseName.find("*", startPos)) != std::string::npos)
     {
@@ -28,35 +139,26 @@ std::map<int, std::vector<Shell>> Basis::getBasis(const std::string& name, const
 
     std::string basisPath = "basis_sets/" + lowercaseName + ".json";
 
-    // Check if the basis set exists
+    // Check if the basis set exists.
     if (!std::filesystem::exists(basisPath))
     {
         throw std::runtime_error("Basis set '" + name + "' not found.");
     }
 
-    // Load the basis set from the JSON file
+    // Load the basis set from the JSON file.
     std::ifstream basisSetFile(basisPath);
     std::stringstream buffer;
     buffer << basisSetFile.rdbuf();
     auto basisJson = nlohmann::json::parse(buffer.str());
 
-    // store the basis set data in a map where the key is the atomic number and the value is a vector of Shell objects
-    std::map<int, std::vector<Shell>> basisResult;
+    // Store the basis set data in a map where the key is the atomic number and the value is a vector of Shell objects.
+    std::map<int, std::vector<RawShell>> basisResult;
     for (const auto& element : elements)
     {
         if (basisJson["elements"].contains(std::to_string(element)))
         {
             for (const auto& shell : basisJson["elements"][std::to_string(element)]["electron_shells"])
             {
-                // Only support cartesian GTOs for now
-                if (shell["function_type"] != "gto" && shell["function_type"] != "gto_cartesian")
-                {
-                    throw std::runtime_error(
-                        "Unsupported function type '" + shell["function_type"].get<std::string>()
-                        + "' for element with atomic number " + std::to_string(element) + " in basis set '" + name + "'."
-                    );
-                }
-
                 for (size_t i = 0; i < shell["angular_momentum"].get<std::vector<int>>().size(); ++i)
                 {
                     int angularMomentum = shell["angular_momentum"].get<std::vector<int>>()[i];
@@ -98,7 +200,7 @@ std::map<int, std::vector<Shell>> Basis::getBasis(const std::string& name, const
         else
         {
             throw std::runtime_error(
-                "Element with atomic number " + std::to_string(element) + " not found in basis set '" + name + "'."
+                fmt::format("{} not found in basis set '{}'.", Utils::atomicNumberToName.at(element), name)
             );
         }
     }
