@@ -288,6 +288,7 @@ Eigen::MatrixXd Molecule::overlapMatrix() const
     std::cout << "Overlap matrix S:\n" << std::fixed << std::setprecision(6) << S << std::endl;
 
     Eigen::MatrixXd S_test = Eigen::MatrixXd::Zero(basisFunctionCount, basisFunctionCount);
+#pragma omp parallel for collapse(2)
     for (size_t i = 0; i < basis.getShellCount(); ++i)
     {
         for (size_t j = i; j < basis.getShellCount(); ++j) // only compute upper triangle as S is symmetric
@@ -299,18 +300,7 @@ Eigen::MatrixXd Molecule::overlapMatrix() const
     {
         for (size_t j = i; j < basisFunctionCount; ++j) { S_test(j, i) = S_test(i, j); }
     }
-
-    for (size_t i = 0; i < basisFunctionCount; ++i)
-    {
-        for (size_t j = 0; j < basisFunctionCount; ++j)
-        {
-            if (std::abs(S_test(i, j)) > 5)
-            {
-                S_test(i, j) = 5;
-            }
-        }
-    }
-    std::cout << "\nOverlap matrix S_test:\n" << std::fixed << std::setprecision(6) << S_test << std::endl;
+    std::cout << "\nOverlap matrix S_test:\n" << std::fixed << std::setprecision(6) << S_test << "\n" << std::endl;
 
     return S;
 }
@@ -327,6 +317,23 @@ Eigen::MatrixXd Molecule::kineticMatrix() const
             T(i, j) = T(j, i) = AtomicOrbital::kinetic(atomicOrbitals[i], atomicOrbitals[j]);
         }
     }
+    std::cout << "Overlap matrix T:\n" << std::fixed << std::setprecision(6) << T << std::endl;
+
+    Eigen::MatrixXd T_test = Eigen::MatrixXd::Zero(basisFunctionCount, basisFunctionCount);
+#pragma omp parallel for collapse(2)
+    for (size_t i = 0; i < basis.getShellCount(); ++i)
+    {
+        for (size_t j = i; j < basis.getShellCount(); ++j) // only compute upper triangle as S is symmetric
+        {
+            IntegralEngine::kinetic(basis, basis.getShells()[i], basis.getShells()[j], T_test);
+        }
+    }
+    for (size_t i = 0; i < basisFunctionCount; ++i)
+    {
+        for (size_t j = i; j < basisFunctionCount; ++j) { T_test(j, i) = T_test(i, j); }
+    }
+    std::cout << "\nOverlap matrix T_test:\n" << std::fixed << std::setprecision(6) << T_test << "\n" << std::endl;
+
     return T;
 }
 

@@ -79,6 +79,89 @@ void IntegralEngine::overlap(const Basis& basis, const Shell& shellA, const Shel
     }
 }
 
+void IntegralEngine::kinetic(const Basis& basis, const Shell& shellA, const Shell& shellB, Eigen::MatrixXd& T)
+{
+    const auto& exps   = basis.getExponents();
+    const auto& coeffs = basis.getCoefficients();
+    const auto& lx     = basis.getLx();
+    const auto& ly     = basis.getLy();
+    const auto& lz     = basis.getLz();
+
+    const size_t nprimA = shellA.nprim;
+    const size_t nprimB = shellB.nprim;
+    const size_t naoA   = shellA.nao;
+    const size_t naoB   = shellB.nao;
+
+    const Eigen::Vector3d& centerA = shellA.center;
+    const Eigen::Vector3d& centerB = shellB.center;
+
+    // Allocate scratch space. Max ang mom needed is L+2 for kinetic integrals.
+    const unsigned max_L = shellA.l + shellB.l + 2;
+    std::vector<double> E_buffer(max_L + 1);
+    std::vector<double> I(max_L + 1, 0.0);
+
+    // Loop over primitive pairs
+    for (size_t pA = 0; pA < nprimA; ++pA)
+    {
+        const double alphaA = exps[shellA.primOffset + pA];
+
+        for (size_t pB = 0; pB < nprimB; ++pB)
+        {
+            const double alphaB = exps[shellB.primOffset + pB];
+
+            const PrimitivePairData primPair = computePrimitivePairData(alphaA, centerA, alphaB, centerB);
+
+            // Pre-calculate fundamental integrals I_t up to max_L
+            const double I0 = std::sqrt(M_PI / primPair.p);
+            I[0]            = I0;
+            if (max_L > 0)
+            {
+                double I_prev = I0;
+                for (unsigned t = 2; t <= max_L; t += 2)
+                {
+                    I[t]   = (t - 1.0) / (2.0 * primPair.p) * I_prev;
+                    I_prev = I[t];
+                }
+            }
+
+            // This primitive pair contributes to all AO pairs in the shell pair
+            for (size_t a = 0; a < naoA; ++a)
+            {
+                const unsigned l1 = lx[shellA.aoOffset + a], m1 = ly[shellA.aoOffset + a], n1 = lz[shellA.aoOffset + a];
+                const double coeffA = coeffs[(shellA.coeffOffset + pA * naoA) + a];
+
+                for (size_t b = 0; b < naoB; ++b)
+                {
+                    const unsigned l2 = lx[shellB.aoOffset + b], m2 = ly[shellB.aoOffset + b], n2 = lz[shellB.aoOffset + b];
+                    const double coeffB = coeffs[(shellB.coeffOffset + pB * naoB) + b];
+
+                    // 1D Overlap components
+                    double Sx = compute1dOverlap(l1, l2, primPair.PA.x(), primPair.PB.x(), I, E_buffer);
+                    double Sy = compute1dOverlap(m1, m2, primPair.PA.y(), primPair.PB.y(), I, E_buffer);
+                    double Sz = compute1dOverlap(n1, n2, primPair.PA.z(), primPair.PB.z(), I, E_buffer);
+
+                    // 1D Kinetic components
+                    double Sl2_x  = compute1dOverlap(l1, l2 + 2, primPair.PA.x(), primPair.PB.x(), I, E_buffer);
+                    double Sl_2_x = (l2 >= 2) ? compute1dOverlap(l1, l2 - 2, primPair.PA.x(), primPair.PB.x(), I, E_buffer) : 0.0;
+                    double Tx     = -0.5 * (l2 * (l2 - 1) * Sl_2_x - alphaB * (4 * l2 + 2) * Sx + 4 * alphaB * alphaB * Sl2_x);
+
+                    double Sl2_y  = compute1dOverlap(m1, m2 + 2, primPair.PA.y(), primPair.PB.y(), I, E_buffer);
+                    double Sl_2_y = (m2 >= 2) ? compute1dOverlap(m1, m2 - 2, primPair.PA.y(), primPair.PB.y(), I, E_buffer) : 0.0;
+                    double Ty     = -0.5 * (m2 * (m2 - 1) * Sl_2_y - alphaB * (4 * m2 + 2) * Sy + 4 * alphaB * alphaB * Sl2_y);
+
+                    double Sl2_z  = compute1dOverlap(n1, n2 + 2, primPair.PA.z(), primPair.PB.z(), I, E_buffer);
+                    double Sl_2_z = (n2 >= 2) ? compute1dOverlap(n1, n2 - 2, primPair.PA.z(), primPair.PB.z(), I, E_buffer) : 0.0;
+                    double Tz     = -0.5 * (n2 * (n2 - 1) * Sl_2_z - alphaB * (4 * n2 + 2) * Sz + 4 * alphaB * alphaB * Sl2_z);
+
+                    double T_prim = primPair.K * (Tx * Sy * Sz + Sx * Ty * Sz + Sx * Sy * Tz);
+
+                    T(shellA.aoOffset + a, shellB.aoOffset + b) += coeffA * coeffB * T_prim;
+                }
+            }
+        }
+    }
+}
+
 IntegralEngine::PrimitivePairData IntegralEngine::computePrimitivePairData(
     double alpha1, const Eigen::Vector3d& A, double alpha2, const Eigen::Vector3d& B
 )

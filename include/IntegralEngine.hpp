@@ -7,6 +7,7 @@ class IntegralEngine
 {
   public:
     static void overlap(const Basis& basis, const Shell& shellA, const Shell& shellB, Eigen::MatrixXd& S);
+    static void kinetic(const Basis& basis, const Shell& shellA, const Shell& shellB, Eigen::MatrixXd& T);
 
   private:
     /**
