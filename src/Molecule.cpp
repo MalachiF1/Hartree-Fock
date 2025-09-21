@@ -317,7 +317,7 @@ Eigen::MatrixXd Molecule::kineticMatrix() const
             T(i, j) = T(j, i) = AtomicOrbital::kinetic(atomicOrbitals[i], atomicOrbitals[j]);
         }
     }
-    std::cout << "Overlap matrix T:\n" << std::fixed << std::setprecision(6) << T << std::endl;
+    std::cout << "Kinetic matrix T:\n" << std::fixed << std::setprecision(6) << T << std::endl;
 
     Eigen::MatrixXd T_test = Eigen::MatrixXd::Zero(basisFunctionCount, basisFunctionCount);
 #pragma omp parallel for collapse(2)
@@ -332,7 +332,7 @@ Eigen::MatrixXd Molecule::kineticMatrix() const
     {
         for (size_t j = i; j < basisFunctionCount; ++j) { T_test(j, i) = T_test(i, j); }
     }
-    std::cout << "\nOverlap matrix T_test:\n" << std::fixed << std::setprecision(6) << T_test << "\n" << std::endl;
+    std::cout << "\nKinetic matrix T_test:\n" << std::fixed << std::setprecision(6) << T_test << "\n" << std::endl;
 
     return T;
 }
@@ -355,6 +355,25 @@ Eigen::MatrixXd Molecule::nuclearAttractionMatrix() const
             V(i, j) = V(j, i) = v_ij;
         }
     }
+    std::cout << "Nuclear attraction matrix V:\n" << std::fixed << std::setprecision(6) << V << "\n" << std::endl;
+
+    Eigen::MatrixXd V_test = Eigen::MatrixXd::Zero(basisFunctionCount, basisFunctionCount);
+    // #pragma omp parallel for collapse(2)
+    for (size_t i = 0; i < basis.getShellCount(); ++i)
+    {
+        for (size_t j = i; j < basis.getShellCount(); ++j) // only compute upper triangle as S is symmetric
+        {
+            IntegralEngine::nuclearAttraction(geometry, basis, basis.getShells()[i], basis.getShells()[j], V_test);
+        }
+    }
+    for (size_t i = 0; i < basisFunctionCount; ++i)
+    {
+        for (size_t j = i; j < basisFunctionCount; ++j) { V_test(j, i) = V_test(i, j); }
+    }
+    std::cout << "\nNuclear attraction matrix V_test:\n"
+              << std::fixed << std::setprecision(6) << V_test << "\n"
+              << std::endl;
+
     return V;
 }
 

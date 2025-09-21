@@ -30,29 +30,67 @@ class IntegralEngine
     );
 
     /**
+     * @brief Computes the Boys function F_m(T).
+     */
+    static double boys(unsigned m, double T);
+
+    struct EBuffer
+    {
+        size_t l1;
+        size_t l2;
+        size_t max_t;
+        std::vector<double> data;
+        EBuffer() = default;
+        EBuffer(unsigned l1, unsigned l2) : l1(l1), l2(l2), max_t(l1 + l2), data((l1 + 1) * (l2 + 1) * (max_t + 2) / 2)
+        {
+        }
+
+        double& operator()(unsigned i, unsigned j, unsigned t)
+        {
+            size_t offset_i = (i * (l2 + 1) * (i + l2 + 1)) / 2;
+            size_t offset_j = (j * (i + 1)) + ((j * (j - 1)) / 2);
+            size_t index    = offset_i + offset_j + t;
+            assert(index < data.size());
+            return data[index];
+        }
+    };
+
+
+    /**
      * @brief Computes 1D Hermite expansion coefficients E_k(i, j, a, b).
      */
-    static void computeHermiteCoeffs(unsigned l1, unsigned l2, double PA, double PB, std::span<double> E);
+    static void computeHermiteCoeffs(unsigned l1, unsigned l2, double p, double PA, double PB, EBuffer& E_buffer);
 
-    /**
-     * @brief Computes the 1D overlap integral for a given angular momentum pair.
-     */
-    static double compute1dOverlap(
-        unsigned l1, unsigned l2, double PA, double PB, const std::vector<double>& I, std::span<double> E_buffer
-    );
 
-    /**
-     * @brief Computes the 3D overlap integral between two primitive Gaussians.
-     */
-    static double computePrimitiveOverlap(
-        unsigned l1,
-        unsigned m1,
-        unsigned n1,
-        unsigned l2,
-        unsigned m2,
-        unsigned n2,
-        const PrimitivePairData& primPair,
-        const std::vector<double>& I,
-        std::span<double> E_buffer
+    struct RBuffer
+    {
+        size_t max_t;
+        size_t max_u;
+        size_t max_v;
+        size_t max_n;
+        std::vector<double> data;
+
+        RBuffer() = default;
+        RBuffer(size_t max_t, size_t max_u, size_t max_v) :
+            max_t(max_t),
+            max_u(max_u),
+            max_v(max_v),
+            max_n(max_t + max_u + max_v + 1),
+            data((max_t + 1) * (max_u + 1) * (max_v + 1) * max_n)
+        {
+        }
+
+        double& operator()(size_t t, size_t u, size_t v, size_t n)
+        {
+            size_t index = n + (v * max_n) + (u * max_n * (max_v + 1)) + (t * (max_u + 1) * (max_v + 1) * max_n);
+            assert(index < data.size());
+            return data[index];
+        }
+
+        void clear() { std::ranges::fill(data, -1.0); }
+    };
+
+    static void computeAuxiliaryIntegrals(
+        unsigned t_max, unsigned u_max, unsigned v_max, double p, const Vec3& PC, std::span<double> F, RBuffer& R_buffer
     );
 };

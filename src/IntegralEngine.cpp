@@ -1,6 +1,9 @@
 #include "IntegralEngine.hpp"
 
+#include <algorithm>
+#include <cassert>
 #include <cmath>
+#include <fmt/core.h>
 #include <numeric>
 #include <span>
 #include <vector>
@@ -22,8 +25,9 @@ void IntegralEngine::overlap(const Basis& basis, const Shell& shellA, const Shel
     const Eigen::Vector3d& centerB = shellB.center;
 
     // Allocate scratch space for Hermite coefficients once per shell pair.
-    const unsigned max_L = shellA.l + shellB.l;
-    std::vector<double> E_buffer(max_L + 1);
+    EBuffer Ex(shellA.l, shellB.l);
+    EBuffer Ey(shellA.l, shellB.l);
+    EBuffer Ez(shellA.l, shellB.l);
 
     // Loop over primitive pairs
     for (size_t pA = 0; pA < nprimA; ++pA)
@@ -36,20 +40,11 @@ void IntegralEngine::overlap(const Basis& basis, const Shell& shellA, const Shel
 
             // Compute data for this primitive pair
             const PrimitivePairData primPair = computePrimitivePairData(alphaA, centerA, alphaB, centerB);
+            double prefactor                 = std::pow(M_PI / primPair.p, 1.5) * primPair.K;
 
-            // Pre-calculate fundamental integrals I_t for this primitive pair.
-            std::vector<double> I(max_L + 1, 0.0);
-            const double I0 = std::sqrt(M_PI / primPair.p);
-            I[0]            = I0;
-            if (max_L > 0)
-            {
-                double I_prev = I0;
-                for (size_t t = 2; t <= max_L; t += 2)
-                {
-                    I[t]   = (t - 1.0) / (2.0 * primPair.p) * I_prev;
-                    I_prev = I[t];
-                }
-            }
+            computeHermiteCoeffs(shellA.l, shellB.l, primPair.p, primPair.PA.x(), primPair.PB.x(), Ex);
+            computeHermiteCoeffs(shellA.l, shellB.l, primPair.p, primPair.PA.y(), primPair.PB.y(), Ey);
+            computeHermiteCoeffs(shellA.l, shellB.l, primPair.p, primPair.PA.z(), primPair.PB.z(), Ez);
 
             // This primitive pair contributes to all AO pairs in the shell pair
             for (size_t a = 0; a < naoA; ++a)
@@ -60,19 +55,11 @@ void IntegralEngine::overlap(const Basis& basis, const Shell& shellA, const Shel
                 {
                     const double coeffB = coeffs[(shellB.coeffOffset + pB * naoB) + b];
 
-                    const double S_prim = computePrimitiveOverlap(
-                        lx[shellA.aoOffset + a],
-                        ly[shellA.aoOffset + a],
-                        lz[shellA.aoOffset + a],
-                        lx[shellB.aoOffset + b],
-                        ly[shellB.aoOffset + b],
-                        lz[shellB.aoOffset + b],
-                        primPair,
-                        I,
-                        E_buffer
-                    );
+                    unsigned l1 = lx[shellA.aoOffset + a], m1 = ly[shellA.aoOffset + a], n1 = lz[shellA.aoOffset + a];
+                    unsigned l2 = lx[shellB.aoOffset + b], m2 = ly[shellB.aoOffset + b], n2 = lz[shellB.aoOffset + b];
 
-                    S(shellA.aoOffset + a, shellB.aoOffset + b) += coeffA * coeffB * S_prim;
+                    S(shellA.aoOffset + a,
+                      shellB.aoOffset + b) += coeffA * coeffB * prefactor * Ex(l1, l2, 0) * Ey(m1, m2, 0) * Ez(n1, n2, 0);
                 }
             }
         }
@@ -95,10 +82,10 @@ void IntegralEngine::kinetic(const Basis& basis, const Shell& shellA, const Shel
     const Eigen::Vector3d& centerA = shellA.center;
     const Eigen::Vector3d& centerB = shellB.center;
 
-    // Allocate scratch space. Max ang mom needed is L+2 for kinetic integrals.
-    const unsigned max_L = shellA.l + shellB.l + 2;
-    std::vector<double> E_buffer(max_L + 1);
-    std::vector<double> I(max_L + 1, 0.0);
+    // Allocate scratch space. Max angular momentum needed is L+2 for kinetic integrals.
+    EBuffer Ex(shellA.l, shellB.l + 2);
+    EBuffer Ey(shellA.l, shellB.l + 2);
+    EBuffer Ez(shellA.l, shellB.l + 2);
 
     // Loop over primitive pairs
     for (size_t pA = 0; pA < nprimA; ++pA)
@@ -110,21 +97,12 @@ void IntegralEngine::kinetic(const Basis& basis, const Shell& shellA, const Shel
             const double alphaB = exps[shellB.primOffset + pB];
 
             const PrimitivePairData primPair = computePrimitivePairData(alphaA, centerA, alphaB, centerB);
+            double prefactor                 = std::pow(M_PI / primPair.p, 1.5) * primPair.K;
 
-            // Pre-calculate fundamental integrals I_t up to max_L
-            const double I0 = std::sqrt(M_PI / primPair.p);
-            I[0]            = I0;
-            if (max_L > 0)
-            {
-                double I_prev = I0;
-                for (unsigned t = 2; t <= max_L; t += 2)
-                {
-                    I[t]   = (t - 1.0) / (2.0 * primPair.p) * I_prev;
-                    I_prev = I[t];
-                }
-            }
+            computeHermiteCoeffs(shellA.l, shellB.l + 2, primPair.p, primPair.PA.x(), primPair.PB.x(), Ex);
+            computeHermiteCoeffs(shellA.l, shellB.l + 2, primPair.p, primPair.PA.y(), primPair.PB.y(), Ey);
+            computeHermiteCoeffs(shellA.l, shellB.l + 2, primPair.p, primPair.PA.z(), primPair.PB.z(), Ez);
 
-            // This primitive pair contributes to all AO pairs in the shell pair
             for (size_t a = 0; a < naoA; ++a)
             {
                 const unsigned l1 = lx[shellA.aoOffset + a], m1 = ly[shellA.aoOffset + a], n1 = lz[shellA.aoOffset + a];
@@ -135,27 +113,125 @@ void IntegralEngine::kinetic(const Basis& basis, const Shell& shellA, const Shel
                     const unsigned l2 = lx[shellB.aoOffset + b], m2 = ly[shellB.aoOffset + b], n2 = lz[shellB.aoOffset + b];
                     const double coeffB = coeffs[(shellB.coeffOffset + pB * naoB) + b];
 
-                    // 1D Overlap components
-                    double Sx = compute1dOverlap(l1, l2, primPair.PA.x(), primPair.PB.x(), I, E_buffer);
-                    double Sy = compute1dOverlap(m1, m2, primPair.PA.y(), primPair.PB.y(), I, E_buffer);
-                    double Sz = compute1dOverlap(n1, n2, primPair.PA.z(), primPair.PB.z(), I, E_buffer);
+                    double term1 = alphaB * (2 * (l2 + m2 + n2) + 3) * Ex(l1, l2, 0) * Ey(m1, m2, 0) * Ez(n1, n2, 0);
 
-                    // 1D Kinetic components
-                    double Sl2_x  = compute1dOverlap(l1, l2 + 2, primPair.PA.x(), primPair.PB.x(), I, E_buffer);
-                    double Sl_2_x = (l2 >= 2) ? compute1dOverlap(l1, l2 - 2, primPair.PA.x(), primPair.PB.x(), I, E_buffer) : 0.0;
-                    double Tx     = -0.5 * (l2 * (l2 - 1) * Sl_2_x - alphaB * (4 * l2 + 2) * Sx + 4 * alphaB * alphaB * Sl2_x);
+                    double term2 = -2.0 * alphaB * alphaB
+                                 * (Ex(l1, l2 + 2, 0) * Ey(m1, m2, 0) * Ez(n1, n2, 0)
+                                    + Ex(l1, l2, 0) * Ey(m1, m2 + 2, 0) * Ez(n1, n2, 0)
+                                    + Ex(l1, l2, 0) * Ey(m1, m2, 0) * Ez(n1, n2 + 2, 0));
 
-                    double Sl2_y  = compute1dOverlap(m1, m2 + 2, primPair.PA.y(), primPair.PB.y(), I, E_buffer);
-                    double Sl_2_y = (m2 >= 2) ? compute1dOverlap(m1, m2 - 2, primPair.PA.y(), primPair.PB.y(), I, E_buffer) : 0.0;
-                    double Ty     = -0.5 * (m2 * (m2 - 1) * Sl_2_y - alphaB * (4 * m2 + 2) * Sy + 4 * alphaB * alphaB * Sl2_y);
+                    double term3 = 0.0;
+                    if (l2 >= 2)
+                        term3 -= l2 * (l2 - 1) * Ex(l1, l2 - 2, 0) * Ey(m1, m2, 0) * Ez(n1, n2, 0);
+                    if (m2 >= 2)
+                        term3 -= m2 * (m2 - 1) * Ex(l1, l2, 0) * Ey(m1, m2 - 2, 0) * Ez(n1, n2, 0);
+                    if (n2 >= 2)
+                        term3 -= n2 * (n2 - 1) * Ex(l1, l2, 0) * Ey(m1, m2, 0) * Ez(n1, n2 - 2, 0);
+                    term3 *= 0.5;
 
-                    double Sl2_z  = compute1dOverlap(n1, n2 + 2, primPair.PA.z(), primPair.PB.z(), I, E_buffer);
-                    double Sl_2_z = (n2 >= 2) ? compute1dOverlap(n1, n2 - 2, primPair.PA.z(), primPair.PB.z(), I, E_buffer) : 0.0;
-                    double Tz     = -0.5 * (n2 * (n2 - 1) * Sl_2_z - alphaB * (4 * n2 + 2) * Sz + 4 * alphaB * alphaB * Sl2_z);
+                    T(shellA.aoOffset + a, shellB.aoOffset + b) += coeffA * coeffB * prefactor * (term1 + term2 + term3);
+                }
+            }
+        }
+    }
+}
 
-                    double T_prim = primPair.K * (Tx * Sy * Sz + Sx * Ty * Sz + Sx * Sy * Tz);
+void IntegralEngine::nuclearAttraction(
+    const std::vector<Atom>& geometry, const Basis& basis, const Shell& shellA, const Shell& shellB, Eigen::MatrixXd& V
+)
+{
+    const auto& exps   = basis.getExponents();
+    const auto& coeffs = basis.getCoefficients();
+    const auto& lx     = basis.getLx();
+    const auto& ly     = basis.getLy();
+    const auto& lz     = basis.getLz();
 
-                    T(shellA.aoOffset + a, shellB.aoOffset + b) += coeffA * coeffB * T_prim;
+    const size_t nprimA = shellA.nprim;
+    const size_t nprimB = shellB.nprim;
+    const size_t naoA   = shellA.nao;
+    const size_t naoB   = shellB.nao;
+
+    const Eigen::Vector3d& centerA = shellA.center;
+    const Eigen::Vector3d& centerB = shellB.center;
+
+    const unsigned max_L_total = shellA.l + shellB.l;
+
+    // Allocate scratch space
+    RBuffer R_buffer(max_L_total, max_L_total, max_L_total);
+    std::vector<double> F(max_L_total + 1);
+    EBuffer Ex(shellA.l, shellB.l);
+    EBuffer Ey(shellA.l, shellB.l);
+    EBuffer Ez(shellA.l, shellB.l);
+
+    for (size_t pA = 0; pA < nprimA; ++pA)
+    {
+        const double alphaA = exps[shellA.primOffset + pA];
+
+        for (size_t pB = 0; pB < nprimB; ++pB)
+        {
+            const double alphaB = exps[shellB.primOffset + pB];
+
+            const PrimitivePairData primPair = computePrimitivePairData(alphaA, centerA, alphaB, centerB);
+            double prefactor                 = (2.0 * M_PI / primPair.p) * primPair.K;
+
+            // Hermite coefficients are independent of nuclear centers, compute once per AO pair
+            computeHermiteCoeffs(shellA.l, shellB.l, primPair.p, primPair.PA.x(), primPair.PB.x(), Ex);
+            computeHermiteCoeffs(shellA.l, shellB.l, primPair.p, primPair.PA.y(), primPair.PB.y(), Ey);
+            computeHermiteCoeffs(shellA.l, shellB.l, primPair.p, primPair.PA.z(), primPair.PB.z(), Ez);
+
+            for (const auto& atom : geometry)
+            {
+                const Eigen::Vector3d& C = atom.coords;
+                const auto Z             = static_cast<double>(atom.atomicNumber);
+
+                const Eigen::Vector3d PC = primPair.P - C;
+                const double T           = primPair.p * PC.squaredNorm();
+
+                for (unsigned i = 0; i <= max_L_total; ++i) { F[i] = boys(i, T); }
+                computeAuxiliaryIntegrals(max_L_total, max_L_total, max_L_total, primPair.p, PC, F, R_buffer);
+
+                for (size_t a = 0; a < naoA; ++a)
+                {
+                    const unsigned l1   = lx[shellA.aoOffset + a];
+                    const unsigned m1   = ly[shellA.aoOffset + a];
+                    const unsigned n1   = lz[shellA.aoOffset + a];
+                    const double coeffA = coeffs[(shellA.coeffOffset + pA * naoA) + a];
+
+                    for (size_t b = 0; b < naoB; ++b)
+                    {
+                        const unsigned l2   = lx[shellB.aoOffset + b];
+                        const unsigned m2   = ly[shellB.aoOffset + b];
+                        const unsigned n2   = lz[shellB.aoOffset + b];
+                        const double coeffB = coeffs[(shellB.coeffOffset + pB * naoB) + b];
+
+                        double sum = 0.0;
+                        for (unsigned t = 0; t <= l1 + l2; ++t)
+                        {
+                            double sum_u = 0.0;
+                            for (unsigned u = 0; u <= m1 + m2; ++u)
+                            {
+                                double sum_v = 0.0;
+                                for (unsigned v = 0; v <= n1 + n2; ++v)
+                                {
+                                    sum_v += Ez(n1, n2, v) * R_buffer(t, u, v, 0);
+                                }
+                                sum_u += Ey(m1, m2, u) * sum_v;
+                            }
+                            sum += Ex(l1, l2, t) * sum_u;
+                        }
+
+                        V(shellA.aoOffset + a, shellB.aoOffset + b) -= coeffA * coeffB * prefactor * Z * sum;
+                    }
+                }
+            }
+        }
+    }
+}
+
+
+
+
+
                 }
             }
         }
@@ -179,40 +255,78 @@ IntegralEngine::PrimitivePairData IntegralEngine::computePrimitivePairData(
     return {.p = p, .K = K, .P = P, .PA = PA, .PB = PB};
 }
 
-void IntegralEngine::computeHermiteCoeffs(unsigned l1, unsigned l2, double PA, double PB, std::span<double> E)
+namespace
 {
-    const unsigned L = l1 + l2;
-    assert(E.size() >= L + 1);
-    std::fill(E.begin(), E.begin() + L + 1, 0.0);
-    E[0] = 1.0;
-
-    // Build up E coefficients for (i, 0) from i=1 to l1
-    for (size_t i = 1; i <= l1; ++i)
-    {
-        E[i] = E[i - 1];
-        for (int k = i - 1; k >= 1; --k) { E[k] = E[k - 1] + PA * E[k]; }
-        E[0] = PA * E[0];
-    }
-
-    // Build up E coefficients for (l1, j) from j=1 to l2
-    for (size_t j = 1; j <= l2; ++j)
-    {
-        E[l1 + j] = E[l1 + j - 1];
-        for (int k = l1 + j - 1; k >= 1; --k) { E[k] = E[k - 1] + PB * E[k]; }
-        E[0] = PB * E[0];
-    }
+double SQRT_PI_BY_2 = std::sqrt(M_PI) / 2.0;
 }
 
-double IntegralEngine::compute1dOverlap(
-    unsigned l1, unsigned l2, double PA, double PB, const std::vector<double>& I, std::span<double> E_buffer
-)
+double IntegralEngine::boys(unsigned m, double T)
 {
-    const int L = l1 + l2;
-    computeHermiteCoeffs(l1, l2, PA, PB, E_buffer);
+    if (T < 1e-9)
+    {
+        // For small T, use the series expansion for stability.
+        // F_m(T) = 1/(2m+1) - T/(2m+3) + ...
+        return 1.0 / (2.0 * m + 1.0);
+    }
 
-    double sum = 0.0;
-    for (int i = 0; i <= L; i += 2) { sum += E_buffer[i] * I[i]; }
-    return sum;
+    if (T > 30.0)
+    {
+        // For large T, use the asymptotic expansion.
+        double F_i = SQRT_PI_BY_2 / std::sqrt(T);
+
+        for (unsigned i = 0; i < m; ++i) { F_i = (i + 0.5) * F_i / T; }
+        return F_i;
+    }
+
+    // Use the upward recursion relation.
+    double sqrt_T = std::sqrt(T);
+    double F_i    = SQRT_PI_BY_2 * std::erf(sqrt_T) / sqrt_T;
+    for (unsigned i = 0; i < m; ++i) { F_i = ((2.0 * i + 1.0) * F_i - std::exp(-T)) / (2.0 * T); }
+    return F_i;
+}
+
+void IntegralEngine::computeHermiteCoeffs(unsigned l1, unsigned l2, double p, double PA, double PB, EBuffer& E_buffer)
+{
+    // fmt::println("Computing Hermite coefficients for l1 = {}, l2 = {}", l1, l2);
+    // Base case: E(0,0,0) = 1.0 (K factor is applied by the caller)
+    E_buffer(0, 0, 0) = 1.0;
+
+    const double oo_2p = 0.5 / p;
+
+    for (unsigned i = 1; i <= l1; ++i)
+    {
+        size_t t = i + 1;
+        while (t-- > 0)
+        {
+            double val = 0.0;
+            if (t <= i - 1)
+                val = PA * E_buffer(i - 1, 0, t);
+            if (t >= 1)
+                val += oo_2p * E_buffer(i - 1, 0, t - 1);
+            if (t + 1 <= i - 1)
+                val += (t + 1) * E_buffer(i - 1, 0, t + 1);
+            E_buffer(i, 0, t) = val;
+        }
+    }
+
+    for (unsigned j = 1; j <= l2; ++j)
+    {
+        for (unsigned i = 0; i <= l1; ++i)
+        {
+            size_t t = i + j + 1;
+            while (t-- > 0)
+            {
+                double val = 0.0;
+                if (t <= i + j - 1)
+                    val = PB * E_buffer(i, j - 1, t);
+                if (t >= 1)
+                    val += oo_2p * E_buffer(i, j - 1, t - 1);
+                if (t + 1 <= i + j - 1)
+                    val += (t + 1) * E_buffer(i, j - 1, t + 1);
+                E_buffer(i, j, t) = val;
+            }
+        }
+    }
 }
 
 double IntegralEngine::computePrimitiveOverlap(
@@ -227,9 +341,47 @@ double IntegralEngine::computePrimitiveOverlap(
     std::span<double> E_buffer
 )
 {
-    double Sx = compute1dOverlap(l1, l2, primPair.PA.x(), primPair.PB.x(), I, E_buffer);
-    double Sy = compute1dOverlap(m1, m2, primPair.PA.y(), primPair.PB.y(), I, E_buffer);
-    double Sz = compute1dOverlap(n1, n2, primPair.PA.z(), primPair.PB.z(), I, E_buffer);
+    // This function implements the recurrence relations for R integrals:
+    // R_{t,u,v}^{n} = t-1 * R_{t-2,u,v}^{n+1} + (P-C)_x * R_{t-1,u,v}^{n+1} (if t>0)
+    // R_{t,u,v}^{n} = u-1 * R_{t,u-2,v}^{n+1} + (P-C)_y * R_{t,u-1,v}^{n+1} (if u>0)
+    // R_{t,u,v}^{n} = v-1 * R_{t,u,v-2}^{n+1} + (P-C)_z * R_{t,u,v-1}^{n+1} (if v>0)
+    // Base case: R_{0,0,0}^{n} = (-2p)^n * F[n]
 
-    return primPair.K * Sx * Sy * Sz;
+    const unsigned n_max = t_max + u_max + v_max;
+
+    for (unsigned n = 0; n <= n_max; ++n) { R_buffer(0, 0, 0, n) = std::pow(-2.0 * p, n) * F[n]; }
+
+    for (int n = n_max; n >= 0; --n)
+    {
+        // Build up t dimension from t = 1 up to max_t
+        for (unsigned t = 1; t <= t_max; ++t)
+        {
+            // Handle the edge case for t=1 to prevent out-of-bounds access
+            double term1         = (t > 1) ? (t - 1) * R_buffer(t - 2, 0, 0, n + 1) : 0.0;
+            R_buffer(t, 0, 0, n) = term1 + (PC.x() * R_buffer(t - 1, 0, 0, n + 1));
+        }
+
+        // Build up u dimension
+        for (unsigned t = 0; t <= t_max; ++t)
+        {
+            for (unsigned u = 1; u <= u_max; ++u)
+            {
+                double term1         = (u > 1) ? (u - 1) * R_buffer(t, u - 2, 0, n + 1) : 0.0;
+                R_buffer(t, u, 0, n) = term1 + (PC.y() * R_buffer(t, u - 1, 0, n + 1));
+            }
+        }
+
+        // Build up v dimension
+        for (unsigned t = 0; t <= t_max; ++t)
+        {
+            for (unsigned u = 0; u <= u_max; ++u)
+            {
+                for (unsigned v = 1; v <= v_max; ++v)
+                {
+                    double term1         = (v > 1) ? (v - 1) * R_buffer(t, u, v - 2, n + 1) : 0.0;
+                    R_buffer(t, u, v, n) = term1 + (PC.z() * R_buffer(t, u, v - 1, n + 1));
+                }
+            }
+        }
+    }
 }
