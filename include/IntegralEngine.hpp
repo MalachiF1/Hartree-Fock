@@ -1,5 +1,6 @@
 #pragma once
 #include "Basis.hpp"
+#include "Molecule.hpp"
 
 #include <span>
 
@@ -8,6 +9,18 @@ class IntegralEngine
   public:
     static void overlap(const Basis& basis, const Shell& shellA, const Shell& shellB, Eigen::MatrixXd& S);
     static void kinetic(const Basis& basis, const Shell& shellA, const Shell& shellB, Eigen::MatrixXd& T);
+    static void nuclearAttraction(
+        const std::vector<Atom>& geometry, const Basis& basis, const Shell& shellA, const Shell& shellB, Eigen::MatrixXd& V
+    );
+
+    static void electronRepulsion(
+        const Basis& basis,
+        const Shell& shellA,
+        const Shell& shellB,
+        const Shell& shellC,
+        const Shell& shellD,
+        ElectronRepulsionTensor& G
+    );
 
   private:
     /**
@@ -29,10 +42,10 @@ class IntegralEngine
         double alpha1, const Eigen::Vector3d& A, double alpha2, const Eigen::Vector3d& B
     );
 
-    /**
-     * @brief Computes the Boys function F_m(T).
-     */
-    static double boys(unsigned m, double T);
+    // /**
+    //  * @brief Computes the Boys function F_m(T).
+    //  */
+    // static void calculateBoys(unsigned m_max, double T, std::span<double> F);
 
     struct EBuffer
     {

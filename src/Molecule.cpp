@@ -285,7 +285,7 @@ Eigen::MatrixXd Molecule::overlapMatrix() const
             S(i, j) = S(j, i) = AtomicOrbital::overlap(atomicOrbitals[i], atomicOrbitals[j]);
         }
     }
-    std::cout << "Overlap matrix S:\n" << std::fixed << std::setprecision(6) << S << std::endl;
+    // std::cout << "Overlap matrix S:\n" << std::fixed << std::setprecision(6) << S << std::endl;
 
     Eigen::MatrixXd S_test = Eigen::MatrixXd::Zero(basisFunctionCount, basisFunctionCount);
 #pragma omp parallel for collapse(2)
@@ -300,9 +300,10 @@ Eigen::MatrixXd Molecule::overlapMatrix() const
     {
         for (size_t j = i; j < basisFunctionCount; ++j) { S_test(j, i) = S_test(i, j); }
     }
-    std::cout << "\nOverlap matrix S_test:\n" << std::fixed << std::setprecision(6) << S_test << "\n" << std::endl;
+    // std::cout << "\nOverlap matrix S_test:\n" << std::fixed << std::setprecision(6) << S_test << "\n" << std::endl;
 
-    return S;
+    fmt::println("Max abs diff S - S_test: {:.6e}", (S - S_test).cwiseAbs().maxCoeff());
+    return S_test;
 }
 
 
@@ -317,7 +318,7 @@ Eigen::MatrixXd Molecule::kineticMatrix() const
             T(i, j) = T(j, i) = AtomicOrbital::kinetic(atomicOrbitals[i], atomicOrbitals[j]);
         }
     }
-    std::cout << "Kinetic matrix T:\n" << std::fixed << std::setprecision(6) << T << std::endl;
+    // std::cout << "Kinetic matrix T:\n" << std::fixed << std::setprecision(6) << T << std::endl;
 
     Eigen::MatrixXd T_test = Eigen::MatrixXd::Zero(basisFunctionCount, basisFunctionCount);
 #pragma omp parallel for collapse(2)
@@ -332,9 +333,11 @@ Eigen::MatrixXd Molecule::kineticMatrix() const
     {
         for (size_t j = i; j < basisFunctionCount; ++j) { T_test(j, i) = T_test(i, j); }
     }
-    std::cout << "\nKinetic matrix T_test:\n" << std::fixed << std::setprecision(6) << T_test << "\n" << std::endl;
+    // std::cout << "\nKinetic matrix T_test:\n" << std::fixed << std::setprecision(6) << T_test << "\n" << std::endl;
 
-    return T;
+    fmt::println("Max abs diff T - T_test: {:.6e}", (T - T_test).cwiseAbs().maxCoeff());
+
+    return T_test;
 }
 
 
@@ -355,10 +358,10 @@ Eigen::MatrixXd Molecule::nuclearAttractionMatrix() const
             V(i, j) = V(j, i) = v_ij;
         }
     }
-    std::cout << "Nuclear attraction matrix V:\n" << std::fixed << std::setprecision(6) << V << "\n" << std::endl;
+    // std::cout << "Nuclear attraction matrix V:\n" << std::fixed << std::setprecision(6) << V << "\n" << std::endl;
 
     Eigen::MatrixXd V_test = Eigen::MatrixXd::Zero(basisFunctionCount, basisFunctionCount);
-    // #pragma omp parallel for collapse(2)
+#pragma omp parallel for collapse(2)
     for (size_t i = 0; i < basis.getShellCount(); ++i)
     {
         for (size_t j = i; j < basis.getShellCount(); ++j) // only compute upper triangle as S is symmetric
@@ -370,11 +373,13 @@ Eigen::MatrixXd Molecule::nuclearAttractionMatrix() const
     {
         for (size_t j = i; j < basisFunctionCount; ++j) { V_test(j, i) = V_test(i, j); }
     }
-    std::cout << "\nNuclear attraction matrix V_test:\n"
-              << std::fixed << std::setprecision(6) << V_test << "\n"
-              << std::endl;
+    // std::cout << "\nNuclear attraction matrix V_test:\n"
+    //           << std::fixed << std::setprecision(6) << V_test << "\n"
+    //           << std::endl;
 
-    return V;
+    fmt::println("Max abs diff V - V_test: {:.6e}", (V - V_test).cwiseAbs().maxCoeff());
+
+    return V_test;
 }
 
 
@@ -411,7 +416,7 @@ ElectronRepulsionTensor Molecule::electronRepulsionTensor(double threshold) cons
                 for (size_t l = 0; l < N_ao; ++l)
                 {
                     // no need to recalculate identical elements of the tensor (enforce quartet symmetry)
-                    if (j > i || l > k || (i * (i + 1) / 2 + j) < (k * (k + 1) / 2 + l))
+                    if (j > i || l > k || ((i * (i + 1) / 2) + j) < ((k * (k + 1) / 2) + l))
                         continue;
 
                     // make sure we did not already calculate this integral in Schwartz screening loop
@@ -431,7 +436,92 @@ ElectronRepulsionTensor Molecule::electronRepulsionTensor(double threshold) cons
             }
         }
     }
-    return Vee;
+
+    size_t sc = basis.getShellCount();
+    Eigen::MatrixXd Q_test(sc, sc);
+    ElectronRepulsionTensor Vee_test(N_ao);
+    const std::vector<Shell>& shells = basis.getShells();
+
+#pragma omp parallel for collapse(2)
+    for (size_t i = 0; i < sc; ++i)
+    {
+        for (size_t j = 0; j <= i; ++j)
+        {
+            IntegralEngine::electronRepulsion(basis, shells[i], shells[j], shells[i], shells[j], Vee_test);
+
+            double maxVal = 0;
+            for (size_t a = 0; a < shells[i].nao; ++a)
+            {
+                for (size_t b = 0; b < shells[j].nao; ++b)
+                {
+                    double val = Vee_test(
+                        shells[i].aoOffset + a, shells[j].aoOffset + b, shells[i].aoOffset + a, shells[j].aoOffset + b
+                    );
+                    maxVal = std::max(maxVal, val);
+                }
+            }
+
+            Q_test(i, j) = Q_test(j, i) = maxVal;
+        }
+    }
+
+#pragma omp parallel for collapse(4) schedule(dynamic, 64)
+    for (size_t i = 0; i < sc; ++i)
+    {
+        for (size_t j = 0; j < sc; ++j)
+        {
+            for (size_t k = 0; k < sc; ++k)
+            {
+                for (size_t l = 0; l < sc; ++l)
+                {
+                    // no need to recalculate identical elements of the tensor (enforce quartet symmetry)
+                    if (j > i || l > k || ((i * (i + 1) / 2) + j) < ((k * (k + 1) / 2) + l))
+                        continue;
+
+                    // make sure we did not already calculate this integral in Schwartz screening loop
+                    if ((i == k && j == l) || (i == l && j == k))
+                        continue;
+
+                    // apply Schwartz screening at the shell level
+                    if (Q_test(i, j) * Q_test(k, l) < threshold * threshold)
+                        continue;
+
+                    IntegralEngine::electronRepulsion(basis, shells[i], shells[j], shells[k], shells[l], Vee_test);
+                }
+            }
+        }
+    }
+
+    fmt::println("Electron repulsion tensor diff:");
+    for (size_t i = 0; i < N_ao; ++i)
+    {
+        for (size_t j = 0; j < N_ao; ++j)
+        {
+            for (size_t k = 0; k < N_ao; ++k)
+            {
+                for (size_t l = 0; l < N_ao; ++l)
+                {
+                    if (j > i || l > k || ((i * (i + 1) / 2) + j) < ((k * (k + 1) / 2) + l))
+                        continue;
+                    double diff = std::abs(Vee(i, j, k, l) - Vee_test(i, j, k, l));
+                    if (diff > 1e-8)
+                        fmt::println(
+                            "({}, {}, {}, {}): {:.8f} vs {:.8f} (diff: {:.8f})",
+                            i,
+                            j,
+                            k,
+                            l,
+                            Vee(i, j, k, l),
+                            Vee_test(i, j, k, l),
+                            diff
+                        );
+                }
+            }
+        }
+    }
+
+
+    return Vee_test;
 }
 
 Eigen::MatrixXd Molecule::schwartzScreeningMatrix() const
