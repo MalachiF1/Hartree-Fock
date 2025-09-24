@@ -81,31 +81,6 @@ extern const std::unordered_map<std::string, unsigned, CaseInsensitiveHash, Case
 
 } // namespace Utils
 
-int dfact(int n)
-{
-    if (n == -1)
-    {
-        return 1;
-    }
-    else if (n < 0)
-    {
-        throw std::invalid_argument("Input must be a non-negative odd integer or -1.");
-    }
-    int result = 1;
-    for (int i = n; i > 0; i -= 2) { result *= i; }
-    return result;
-}
-
-int fact(int n)
-{
-    if (n < 0)
-        throw std::invalid_argument("Input must be a non-negative integer.");
-
-    int result = 1;
-    for (int i = 2; i <= n; ++i) { result *= i; }
-    return result;
-}
-
 namespace
 {
 double SQRT_PI_BY_2 = std::sqrt(M_PI) / 2.0;

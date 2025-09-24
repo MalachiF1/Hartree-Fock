@@ -28,18 +28,30 @@ class IntegralEngine
      */
     struct PrimitivePairData
     {
-        double p;           // Exponent sum: alpha_a + alpha_b
-        double K;           // Pre-exponential factor: exp(- (alpha_a*alpha_b/p) * |A-B|^2 )
-        Eigen::Vector3d P;  // New center: (alpha_a*A + alpha_b*B) / p
-        Eigen::Vector3d PA; // Vector from new center to old center A: P - A
-        Eigen::Vector3d PB; // Vector from new center to old center B: P - B
+        double p; // Exponent sum: alpha_a + alpha_b
+        double K; // Pre-exponential factor: exp(- (alpha_a*alpha_b/p) * |A-B|^2 )
+
+        // New center: (alpha_a*A + alpha_b*B) / p
+        double Px;
+        double Py;
+        double Pz;
+
+        // Vector from new center to old center A: P - A
+        double PAx;
+        double PAy;
+        double PAz;
+
+        // Vector from new center to old center B: P - B
+        double PBx;
+        double PBy;
+        double PBz;
     };
 
     /**
      * @brief Computes pre-calculated quantities for a pair of primitive Gaussians.
      */
     static PrimitivePairData computePrimitivePairData(
-        double alpha1, const Eigen::Vector3d& A, double alpha2, const Eigen::Vector3d& B
+        double alpha1, double xa, double ya, double za, double alpha2, double xb, double yb, double zb
     );
 
     // /**
@@ -60,9 +72,18 @@ class IntegralEngine
 
         double& operator()(unsigned i, unsigned j, unsigned t)
         {
-            size_t offset_i = (i * (l2 + 1) * (i + l2 + 1)) / 2;
-            size_t offset_j = (j * (i + 1)) + ((j * (j - 1)) / 2);
-            size_t index    = offset_i + offset_j + t;
+            const size_t offset_i = i * (l2 + 1) * (i + l2 + 1) / 2;
+            const size_t offset_j = (j * (i + 1)) + j * (j - 1) / 2;
+            const size_t index    = offset_i + offset_j + t;
+            assert(index < data.size());
+            return data[index];
+        }
+
+        const double& operator()(unsigned i, unsigned j, unsigned t) const
+        {
+            const size_t offset_i = i * (l2 + 1) * (i + l2 + 1) / 2;
+            const size_t offset_j = (j * (i + 1)) + j * (j - 1) / 2;
+            const size_t index    = offset_i + offset_j + t;
             assert(index < data.size());
             return data[index];
         }
@@ -95,10 +116,21 @@ class IntegralEngine
 
         double& operator()(size_t t, size_t u, size_t v, size_t n)
         {
-            size_t index = n + (v * max_n) + (u * max_n * (max_v + 1)) + (t * (max_u + 1) * (max_v + 1) * max_n);
+            // const size_t index = n + (v * max_n) + (u * max_n * (max_v + 1)) + (t * (max_u + 1) * (max_v + 1) * max_n);
+            const size_t index = t + u * (max_t + 1) + v * (max_t + 1) * (max_u + 1)
+                               + n * (max_t + 1) * (max_u + 1) * (max_v + 1);
             assert(index < data.size());
             return data[index];
         }
+
+        const double& operator()(size_t t, size_t u, size_t v, size_t n) const
+        {
+            const size_t index = t + u * (max_t + 1) + v * (max_t + 1) * (max_u + 1)
+                               + n * (max_t + 1) * (max_u + 1) * (max_v + 1);
+            assert(index < data.size());
+            return data[index];
+        }
+
 
         void clear() { std::ranges::fill(data, -1.0); }
     };

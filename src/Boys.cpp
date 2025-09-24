@@ -1,5 +1,7 @@
 #include "Boys.hpp"
 
+#include "Utils.hpp"
+
 #include <cmath>
 #include <fstream>
 #include <iostream>
@@ -19,31 +21,46 @@ void Boys::calculateBoys(unsigned m_max, double T, std::span<double> F)
         return;
     }
 
-    const auto& gridManager   = GridManager::getInstance();
-    bool useDownwardRecursion = (T <= TRANSITION_VALUES[m_max]);
+    const auto& gridManager    = GridManager::getInstance();
+    bool useDownwardRecursion  = (T <= TRANSITION_VALUES[m_max]);
+    auto gridIndex             = static_cast<size_t>(T / GRID_STEP_DELTA);
+    double T_grid              = gridIndex * GRID_STEP_DELTA;
+    double T_diff              = T - T_grid;
+    double half_T_diff_squared = 0.5 * T_diff * T_diff;
+
+    if (m_max == 0 || m_max == 1)
+    {
+        F[0] = gridManager.getValue(0, gridIndex) - (T_diff * gridManager.getValue(1, gridIndex))
+             + (half_T_diff_squared * gridManager.getValue(2, gridIndex));
+
+        if (m_max == 0)
+            return;
+
+        F[1] = gridManager.getValue(1, gridIndex) - (T_diff * gridManager.getValue(2, gridIndex))
+             + (half_T_diff_squared * gridManager.getValue(3, gridIndex));
+        return;
+    }
 
     unsigned startOrder = useDownwardRecursion ? m_max : 0;
-    auto gridIndex      = static_cast<size_t>(T / GRID_STEP_DELTA);
-    double T_grid       = gridIndex * GRID_STEP_DELTA;
-    double T_diff       = T - T_grid;
-
-    double F_start = gridManager.getValue(startOrder, gridIndex)
+    double F_start      = gridManager.getValue(startOrder, gridIndex)
                    - (T_diff * gridManager.getValue(startOrder + 1, gridIndex))
-                   + (0.5 * T_diff * T_diff * gridManager.getValue(startOrder + 2, gridIndex));
-
+                   + (half_T_diff_squared * gridManager.getValue(startOrder + 2, gridIndex));
     F[startOrder] = F_start;
 
+    // double expMinusT;
+    // if (T > EXP_CUTOFF)
+    //     expMinusT = SchraudolphExp(-T);
+    // else
+    // expMinusT = std::exp(-T);
 
-    // TODO: Use Gill et al. method for exp(-T) for small T, and Schraudoplh method for large T.
+    double expMinusT = std::exp(-T);
 
     if (useDownwardRecursion)
     {
-        double expMinusT = std::exp(-T);
         for (unsigned m = m_max; m >= 1; --m) { F[m - 1] = ((2 * T * F[m]) + expMinusT) / ((2 * (m - 1)) + 1); }
     }
     else
     {
-        double expMinusT = std::exp(-T);
         for (unsigned m = 0; m < m_max; ++m) { F[m + 1] = ((2.0 * m + 1.0) * F[m] - expMinusT) / (2.0 * T); }
     }
 }

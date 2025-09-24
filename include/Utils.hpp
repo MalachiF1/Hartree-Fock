@@ -43,7 +43,14 @@ extern const std::unordered_map<std::string, unsigned, CaseInsensitiveHash, Case
  * @param n The integer for which to compute the double factorial.
  * @return The double factorial of n, or 1 if n is -1.
  */
-int dfact(int n);
+constexpr int dfact(int n)
+{
+    if (n <= 0)
+        return 1;
+    int res = 1;
+    for (int i = n; i >= 1; i -= 2) res *= i;
+    return res;
+}
 
 /**
  * Computes the factorial of an integer n. This is simple itterative implementation, mosty for small n.
@@ -51,7 +58,15 @@ int dfact(int n);
  * @param n The integer for which to compute the factorial.
  * @return The factorial of n
  */
-int fact(int n);
+constexpr int fact(int n)
+{
+    if (n < 0)
+        throw std::invalid_argument("Input must be a non-negative integer.");
+
+    int result = 1;
+    for (int i = 2; i <= n; ++i) { result *= i; }
+    return result;
+}
 
 /**
  * Computes the Boys function F_m(T) using the hypergeometric function.
@@ -70,3 +85,22 @@ double boys(int m, double T);
  * @return The inverse square root matrix S^(-1/2).
  */
 Eigen::MatrixXd inverseSqrtMatrix(const Eigen::MatrixXd& S);
+
+/**
+ * @brief Approximates the exponential function e^x for a 64-bit double.
+ *
+ * This function adapts the Schraudolph approximation for double-precision
+ * floating-point numbers by using constants appropriate for their 64-bit
+ * IEEE 754 representation.
+ *
+ * @param x The input value (double).
+ * @return An approximation of e^x (double).
+ */
+inline double SchraudolphExp(double x)
+{
+    constexpr double a = (1ll << 52) / std::numbers::ln2;
+    constexpr double b = (1ll << 52) * (1023 - 0.04367744890362246);
+    x                  = (a * x) + b;
+    auto i             = static_cast<uint64_t>(x);
+    return std::bit_cast<double>(i);
+}

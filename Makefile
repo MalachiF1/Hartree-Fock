@@ -7,11 +7,14 @@ CXX = g++
 # -g -Wall -Wextra / -O3 -march=native -flto (also add -flto in LDFLAGS)
 
 # Compiler flags
-CXXFLAGS = -std=c++20 -Iinclude -Ieigen -Inlohmann -Ifmt/include -fopenmp -pg -O3 -march=native -Wall -Wextra
+CXXFLAGS = -std=c++20 -Iinclude -Ieigen -Inlohmann -Ifmt/include -fopenmp -g -pthread -fno-omit-frame-pointer -Wall -Wextra -O3
+# CXXFLAGS = -std=c++20 -Iinclude -Ieigen -Inlohmann -Ifmt/include -fopenmp -O3 -march=native -flto -O3 -funroll-loops -ffp-contract=fast -fno-math-errno -freciprocal-math -fno-trapping-math -funsafe-math-optimizations
+# -funsafe-math-optimizations
 
 # Linker flags (e.g., for linking external libraries)
 # link OpenBLAS statically
-LDFLAGS = -fopenmp -Wl,-Bstatic -lopenblas -Wl,-Bdynamic -pg
+LDFLAGS = -fopenmp -Wl,-Bstatic -lopenblas -Wl,-Bdynamic -g
+# LDFLAGS = -fopenmp -Wl,-Bstatic -lopenblas -Wl,-Bdynamic -flto
 
 # Directories
 SRCDIR = src
@@ -60,10 +63,10 @@ run: all
 	./$(TARGET) $(filter-out run,$(MAKECMDGOALS))
 
 profile: all
-	./$(TARGET)
-	gprof -b bin/hf_program gmon.out > profiling_output.txt
-	conda run -n sci gprof2dot profiling_output.txt | dot -Tpng -o callgraph.png
-	@echo "Profiling complete. Check profiling_output.txt and callgraph.png for results."
+	# ./$(TARGET) $(filter-out run,$(MAKECMDGOALS))
+	perf record -g -- ./$(TARGET) $(filter-out profile,$(MAKECMDGOALS))
+	perf report --stdio > perf_report.txt
+	@echo "Profiling complete. See perf_report.txt or use 'perf report' to view results."
 
 # Clean up build artifacts
 clean:

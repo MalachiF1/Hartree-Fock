@@ -14,16 +14,7 @@
 std::string Shell::toString() const
 {
     return fmt::format(
-        "Shell(l={}, center=({:.4f}, {:.4f}, {:.4f}), nao={}, nprim={}, primOffset={}, aoOffset={}, coeffOffset={})",
-        l,
-        center.x(),
-        center.y(),
-        center.z(),
-        nao,
-        nprim,
-        primOffset,
-        aoOffset,
-        coeffOffset
+        "Shell(l={}, nao={}, nprim={}, primOffset={}, aoOffset={}, coeffOffset={})", l, nao, nprim, primOffset, aoOffset, coeffOffset
     );
 }
 
@@ -60,7 +51,6 @@ Basis::Basis(const std::string& name, const std::vector<Atom>& geometry) : name(
         {
             this->shells.emplace_back(
                 rawShell.angularMomentum,
-                atom.coords,
                 (rawShell.angularMomentum + 1) * (rawShell.angularMomentum + 2) / 2,
                 rawShell.exponents.size(),
                 primOffset,

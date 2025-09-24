@@ -15,14 +15,14 @@ void IntegralEngine::overlap(const Basis& basis, const Shell& shellA, const Shel
     const auto& lx     = basis.getLx();
     const auto& ly     = basis.getLy();
     const auto& lz     = basis.getLz();
+    const auto& cx     = basis.getCx();
+    const auto& cy     = basis.getCy();
+    const auto& cz     = basis.getCz();
 
     const size_t nprimA = shellA.nprim;
     const size_t nprimB = shellB.nprim;
     const size_t naoA   = shellA.nao;
     const size_t naoB   = shellB.nao;
-
-    const Eigen::Vector3d& centerA = shellA.center;
-    const Eigen::Vector3d& centerB = shellB.center;
 
     // Allocate scratch space for Hermite coefficients once per shell pair.
     EBuffer Ex(shellA.l, shellB.l);
@@ -33,18 +33,25 @@ void IntegralEngine::overlap(const Basis& basis, const Shell& shellA, const Shel
     for (size_t pA = 0; pA < nprimA; ++pA)
     {
         const double alphaA = exps[shellA.primOffset + pA];
+        const double cxA    = cx[shellA.primOffset + pA];
+        const double cyA    = cy[shellA.primOffset + pA];
+        const double czA    = cz[shellA.primOffset + pA];
 
         for (size_t pB = 0; pB < nprimB; ++pB)
         {
             const double alphaB = exps[shellB.primOffset + pB];
+            const double cxB    = cx[shellB.primOffset + pB];
+            const double cyB    = cy[shellB.primOffset + pB];
+            const double czB    = cz[shellB.primOffset + pB];
+            const Eigen::Vector3d centerA(cxA, cyA, czA);
 
             // Compute data for this primitive pair
-            const PrimitivePairData primPair = computePrimitivePairData(alphaA, centerA, alphaB, centerB);
+            const PrimitivePairData primPair = computePrimitivePairData(alphaA, cxA, cyA, czA, alphaB, cxB, cyB, czB);
             double prefactor                 = std::pow(M_PI / primPair.p, 1.5) * primPair.K;
 
-            computeHermiteCoeffs(shellA.l, shellB.l, primPair.p, primPair.PA.x(), primPair.PB.x(), Ex);
-            computeHermiteCoeffs(shellA.l, shellB.l, primPair.p, primPair.PA.y(), primPair.PB.y(), Ey);
-            computeHermiteCoeffs(shellA.l, shellB.l, primPair.p, primPair.PA.z(), primPair.PB.z(), Ez);
+            computeHermiteCoeffs(shellA.l, shellB.l, primPair.p, primPair.PAx, primPair.PBx, Ex);
+            computeHermiteCoeffs(shellA.l, shellB.l, primPair.p, primPair.PAy, primPair.PBy, Ey);
+            computeHermiteCoeffs(shellA.l, shellB.l, primPair.p, primPair.PAz, primPair.PBz, Ez);
 
             // This primitive pair contributes to all AO pairs in the shell pair
             for (size_t a = 0; a < naoA; ++a)
@@ -73,14 +80,14 @@ void IntegralEngine::kinetic(const Basis& basis, const Shell& shellA, const Shel
     const auto& lx     = basis.getLx();
     const auto& ly     = basis.getLy();
     const auto& lz     = basis.getLz();
+    const auto& cx     = basis.getCx();
+    const auto& cy     = basis.getCy();
+    const auto& cz     = basis.getCz();
 
     const size_t nprimA = shellA.nprim;
     const size_t nprimB = shellB.nprim;
     const size_t naoA   = shellA.nao;
     const size_t naoB   = shellB.nao;
-
-    const Eigen::Vector3d& centerA = shellA.center;
-    const Eigen::Vector3d& centerB = shellB.center;
 
     // Allocate scratch space. Max angular momentum needed is L+2 for kinetic integrals.
     EBuffer Ex(shellA.l, shellB.l + 2);
@@ -91,17 +98,23 @@ void IntegralEngine::kinetic(const Basis& basis, const Shell& shellA, const Shel
     for (size_t pA = 0; pA < nprimA; ++pA)
     {
         const double alphaA = exps[shellA.primOffset + pA];
+        const double cxA    = cx[shellA.primOffset + pA];
+        const double cyA    = cy[shellA.primOffset + pA];
+        const double czA    = cz[shellA.primOffset + pA];
 
         for (size_t pB = 0; pB < nprimB; ++pB)
         {
             const double alphaB = exps[shellB.primOffset + pB];
+            const double cxB    = cx[shellB.primOffset + pB];
+            const double cyB    = cy[shellB.primOffset + pB];
+            const double czB    = cz[shellB.primOffset + pB];
 
-            const PrimitivePairData primPair = computePrimitivePairData(alphaA, centerA, alphaB, centerB);
+            const PrimitivePairData primPair = computePrimitivePairData(alphaA, cxA, cyA, czA, alphaB, cxB, cyB, czB);
             double prefactor                 = std::pow(M_PI / primPair.p, 1.5) * primPair.K;
 
-            computeHermiteCoeffs(shellA.l, shellB.l + 2, primPair.p, primPair.PA.x(), primPair.PB.x(), Ex);
-            computeHermiteCoeffs(shellA.l, shellB.l + 2, primPair.p, primPair.PA.y(), primPair.PB.y(), Ey);
-            computeHermiteCoeffs(shellA.l, shellB.l + 2, primPair.p, primPair.PA.z(), primPair.PB.z(), Ez);
+            computeHermiteCoeffs(shellA.l, shellB.l + 2, primPair.p, primPair.PAx, primPair.PBx, Ex);
+            computeHermiteCoeffs(shellA.l, shellB.l + 2, primPair.p, primPair.PAy, primPair.PBy, Ey);
+            computeHermiteCoeffs(shellA.l, shellB.l + 2, primPair.p, primPair.PAz, primPair.PBz, Ez);
 
             for (size_t a = 0; a < naoA; ++a)
             {
@@ -145,14 +158,14 @@ void IntegralEngine::nuclearAttraction(
     const auto& lx     = basis.getLx();
     const auto& ly     = basis.getLy();
     const auto& lz     = basis.getLz();
+    const auto& cx     = basis.getCx();
+    const auto& cy     = basis.getCy();
+    const auto& cz     = basis.getCz();
 
     const size_t nprimA = shellA.nprim;
     const size_t nprimB = shellB.nprim;
     const size_t naoA   = shellA.nao;
     const size_t naoB   = shellB.nao;
-
-    const Eigen::Vector3d& centerA = shellA.center;
-    const Eigen::Vector3d& centerB = shellB.center;
 
     const unsigned max_L_total = shellA.l + shellB.l;
 
@@ -166,25 +179,31 @@ void IntegralEngine::nuclearAttraction(
     for (size_t pA = 0; pA < nprimA; ++pA)
     {
         const double alphaA = exps[shellA.primOffset + pA];
+        const double cxA    = cx[shellA.primOffset + pA];
+        const double cyA    = cy[shellA.primOffset + pA];
+        const double czA    = cz[shellA.primOffset + pA];
 
         for (size_t pB = 0; pB < nprimB; ++pB)
         {
             const double alphaB = exps[shellB.primOffset + pB];
+            const double cxB    = cx[shellB.primOffset + pB];
+            const double cyB    = cy[shellB.primOffset + pB];
+            const double czB    = cz[shellB.primOffset + pB];
 
-            const PrimitivePairData primPair = computePrimitivePairData(alphaA, centerA, alphaB, centerB);
+            const PrimitivePairData primPair = computePrimitivePairData(alphaA, cxA, cyA, czA, alphaB, cxB, cyB, czB);
             double prefactor                 = (2.0 * M_PI / primPair.p) * primPair.K;
 
             // Hermite coefficients are independent of nuclear centers, compute once per AO pair
-            computeHermiteCoeffs(shellA.l, shellB.l, primPair.p, primPair.PA.x(), primPair.PB.x(), Ex);
-            computeHermiteCoeffs(shellA.l, shellB.l, primPair.p, primPair.PA.y(), primPair.PB.y(), Ey);
-            computeHermiteCoeffs(shellA.l, shellB.l, primPair.p, primPair.PA.z(), primPair.PB.z(), Ez);
+            computeHermiteCoeffs(shellA.l, shellB.l, primPair.p, primPair.PAx, primPair.PBx, Ex);
+            computeHermiteCoeffs(shellA.l, shellB.l, primPair.p, primPair.PAy, primPair.PBy, Ey);
+            computeHermiteCoeffs(shellA.l, shellB.l, primPair.p, primPair.PAz, primPair.PBz, Ez);
 
             for (const auto& atom : geometry)
             {
                 const Eigen::Vector3d& C = atom.coords;
                 const auto Z             = static_cast<double>(atom.atomicNumber);
 
-                const Eigen::Vector3d PC = primPair.P - C;
+                const Eigen::Vector3d PC = Vec3(primPair.Px, primPair.Py, primPair.Pz) - C;
                 const double T           = primPair.p * PC.squaredNorm();
 
                 Boys::calculateBoys(max_L_total, T, F);
@@ -205,19 +224,19 @@ void IntegralEngine::nuclearAttraction(
                         const double coeffB = coeffs[(shellB.coeffOffset + pB * naoB) + b];
 
                         double sum = 0.0;
-                        for (unsigned t = 0; t <= l1 + l2; ++t)
+                        for (unsigned v = 0; v <= n1 + n2; ++v)
                         {
                             double sum_u = 0.0;
                             for (unsigned u = 0; u <= m1 + m2; ++u)
                             {
-                                double sum_v = 0.0;
-                                for (unsigned v = 0; v <= n1 + n2; ++v)
+                                double sum_t = 0.0;
+                                for (unsigned t = 0; t <= l1 + l2; ++t)
                                 {
-                                    sum_v += Ez(n1, n2, v) * R_buffer(t, u, v, 0);
+                                    sum_t += Ex(l1, l2, t) * R_buffer(t, u, v, 0);
                                 }
-                                sum_u += Ey(m1, m2, u) * sum_v;
+                                sum_u += Ey(m1, m2, u) * sum_t;
                             }
-                            sum += Ex(l1, l2, t) * sum_u;
+                            sum += Ez(n1, n2, v) * sum_u;
                         }
 
                         V(shellA.aoOffset + a, shellB.aoOffset + b) -= coeffA * coeffB * prefactor * Z * sum;
@@ -237,145 +256,231 @@ void IntegralEngine::electronRepulsion(
     const auto& lx     = basis.getLx();
     const auto& ly     = basis.getLy();
     const auto& lz     = basis.getLz();
+    const auto& cx     = basis.getCx();
+    const auto& cy     = basis.getCy();
+    const auto& cz     = basis.getCz();
 
     const size_t nprimA = shellA.nprim, naoA = shellA.nao;
     const size_t nprimB = shellB.nprim, naoB = shellB.nao;
     const size_t nprimC = shellC.nprim, naoC = shellC.nao;
     const size_t nprimD = shellD.nprim, naoD = shellD.nao;
 
-    const Eigen::Vector3d& centerA = shellA.center;
-    const Eigen::Vector3d& centerB = shellB.center;
-    const Eigen::Vector3d& centerC = shellC.center;
-    const Eigen::Vector3d& centerD = shellD.center;
 
-    // Allocate scratch space for Hermite coefficients
+    // Pre-calculate and cache all (cd) pair data
+    const size_t size = nprimC * nprimD;
+    std::vector<EBuffer> Ex_cd_vec(size, EBuffer(shellC.l, shellD.l));
+    std::vector<EBuffer> Ey_cd_vec(size, EBuffer(shellC.l, shellD.l));
+    std::vector<EBuffer> Ez_cd_vec(size, EBuffer(shellC.l, shellD.l));
+    std::vector<PrimitivePairData> primPairs_cd;
+    std::vector<size_t> pC_indices, pD_indices;
+    primPairs_cd.reserve(size);
+    pC_indices.reserve(size);
+    pD_indices.reserve(size);
+
+    for (size_t pC = 0; pC < nprimC; ++pC)
+    {
+        const double alphaC = exps[shellC.primOffset + pC];
+        const double cxC    = cx[shellC.primOffset + pC];
+        const double cyC    = cy[shellC.primOffset + pC];
+        const double czC    = cz[shellC.primOffset + pC];
+
+        for (size_t pD = 0; pD < nprimD; ++pD)
+        {
+            const double alphaD = exps[shellD.primOffset + pD];
+            const double cxD    = cx[shellD.primOffset + pD];
+            const double cyD    = cy[shellD.primOffset + pD];
+            const double czD    = cz[shellD.primOffset + pD];
+
+            pC_indices.emplace_back(pC);
+            pD_indices.emplace_back(pD);
+            primPairs_cd.emplace_back(computePrimitivePairData(alphaC, cxC, cyC, czC, alphaD, cxD, cyD, czD));
+            const size_t idx = (pC * nprimD) + pD;
+
+            computeHermiteCoeffs(
+                shellC.l, shellD.l, primPairs_cd[idx].p, primPairs_cd[idx].PAx, primPairs_cd[idx].PBx, Ex_cd_vec[idx]
+            );
+            computeHermiteCoeffs(
+                shellC.l, shellD.l, primPairs_cd[idx].p, primPairs_cd[idx].PAy, primPairs_cd[idx].PBy, Ey_cd_vec[idx]
+            );
+            computeHermiteCoeffs(
+                shellC.l, shellD.l, primPairs_cd[idx].p, primPairs_cd[idx].PAz, primPairs_cd[idx].PBz, Ez_cd_vec[idx]
+            );
+        }
+    }
+
+    // Allocate scratch space for (ab) pair and other intermediates
     EBuffer Ex_ab(shellA.l, shellB.l), Ey_ab(shellA.l, shellB.l), Ez_ab(shellA.l, shellB.l);
-    EBuffer Ex_cd(shellC.l, shellD.l), Ey_cd(shellC.l, shellD.l), Ez_cd(shellC.l, shellD.l);
-
     const unsigned max_L_total = shellA.l + shellB.l + shellC.l + shellD.l;
     RBuffer R_buffer(max_L_total, max_L_total, max_L_total);
     std::vector<double> F(max_L_total + 1);
 
-    // Loop over primitive quartets
+    // Loop over (ab) primitive pairs
     for (size_t pA = 0; pA < nprimA; ++pA)
     {
         const double alphaA = exps[shellA.primOffset + pA];
+        const double cxA    = cx[shellA.primOffset + pA];
+        const double cyA    = cy[shellA.primOffset + pA];
+        const double czA    = cz[shellA.primOffset + pA];
 
         for (size_t pB = 0; pB < nprimB; ++pB)
         {
             const double alphaB = exps[shellB.primOffset + pB];
+            const double cxB    = cx[shellB.primOffset + pB];
+            const double cyB    = cy[shellB.primOffset + pB];
+            const double czB    = cz[shellB.primOffset + pB];
 
-            const PrimitivePairData primPair_ab = computePrimitivePairData(alphaA, centerA, alphaB, centerB);
+            const PrimitivePairData primPair_ab = computePrimitivePairData(alphaA, cxA, cyA, czA, alphaB, cxB, cyB, czB);
 
-            computeHermiteCoeffs(shellA.l, shellB.l, primPair_ab.p, primPair_ab.PA.x(), primPair_ab.PB.x(), Ex_ab);
-            computeHermiteCoeffs(shellA.l, shellB.l, primPair_ab.p, primPair_ab.PA.y(), primPair_ab.PB.y(), Ey_ab);
-            computeHermiteCoeffs(shellA.l, shellB.l, primPair_ab.p, primPair_ab.PA.z(), primPair_ab.PB.z(), Ez_ab);
+            computeHermiteCoeffs(shellA.l, shellB.l, primPair_ab.p, primPair_ab.PAx, primPair_ab.PBx, Ex_ab);
+            computeHermiteCoeffs(shellA.l, shellB.l, primPair_ab.p, primPair_ab.PAy, primPair_ab.PBy, Ey_ab);
+            computeHermiteCoeffs(shellA.l, shellB.l, primPair_ab.p, primPair_ab.PAz, primPair_ab.PBz, Ez_ab);
 
-            for (size_t pC = 0; pC < nprimC; ++pC)
+            // Loop over cached (cd) pairs
+            for (size_t cd_idx = 0; cd_idx < primPairs_cd.size(); ++cd_idx)
             {
-                const double alphaC = exps[shellC.primOffset + pC];
-                for (size_t pD = 0; pD < nprimD; ++pD)
+                const auto& primPair_cd = primPairs_cd[cd_idx];
+                const size_t pC         = pC_indices[cd_idx];
+                const size_t pD         = pD_indices[cd_idx];
+                const EBuffer& Ex_cd    = Ex_cd_vec[cd_idx];
+                const EBuffer& Ey_cd    = Ey_cd_vec[cd_idx];
+                const EBuffer& Ez_cd    = Ez_cd_vec[cd_idx];
+
+                const double prefactor = (2.0 * std::pow(M_PI, 2.5)
+                                          / (primPair_ab.p * primPair_cd.p * std::sqrt(primPair_ab.p + primPair_cd.p)))
+                                       * primPair_ab.K * primPair_cd.K;
+
+                const double delta = (primPair_ab.p * primPair_cd.p) / (primPair_ab.p + primPair_cd.p);
+                const auto P_ab    = Vec3(primPair_ab.Px, primPair_ab.Py, primPair_ab.Pz);
+                const auto P_cd    = Vec3(primPair_cd.Px, primPair_cd.Py, primPair_cd.Pz);
+                const double T     = delta * (P_ab - P_cd).squaredNorm();
+
+                Boys::calculateBoys(max_L_total, T, F);
+                computeAuxiliaryIntegrals(max_L_total, max_L_total, max_L_total, delta, P_ab - P_cd, F, R_buffer);
+
+                // Create a temporary tensor to store all primitive integrals for this quartet
+                std::vector<double> prim_integrals(naoA * naoB * naoC * naoD);
+
+                const unsigned naoCD  = naoC * naoD;
+                const unsigned naoBCD = naoB * naoCD;
+
+                for (size_t a = 0; a < naoA; ++a)
                 {
-                    const double alphaD = exps[shellD.primOffset + pD];
+                    const unsigned i  = shellA.aoOffset + a;
+                    const unsigned l1 = lx[shellA.aoOffset + a];
+                    const unsigned m1 = ly[shellA.aoOffset + a];
+                    const unsigned n1 = lz[shellA.aoOffset + a];
 
-                    const PrimitivePairData primPair_cd = computePrimitivePairData(alphaC, centerC, alphaD, centerD);
-
-                    const double prefactor = (2.0 * std::pow(M_PI, 2.5)
-                                              / (primPair_ab.p * primPair_cd.p * std::sqrt(primPair_ab.p + primPair_cd.p)))
-                                           * primPair_ab.K * primPair_cd.K;
-
-                    computeHermiteCoeffs(shellC.l, shellD.l, primPair_cd.p, primPair_cd.PA.x(), primPair_cd.PB.x(), Ex_cd);
-                    computeHermiteCoeffs(shellC.l, shellD.l, primPair_cd.p, primPair_cd.PA.y(), primPair_cd.PB.y(), Ey_cd);
-                    computeHermiteCoeffs(shellC.l, shellD.l, primPair_cd.p, primPair_cd.PA.z(), primPair_cd.PB.z(), Ez_cd);
-
-                    const double delta         = (primPair_ab.p * primPair_cd.p) / (primPair_ab.p + primPair_cd.p);
-                    const Eigen::Vector3d P_ab = primPair_ab.P;
-                    const Eigen::Vector3d P_cd = primPair_cd.P;
-                    const double T             = delta * (P_ab - P_cd).squaredNorm();
-
-                    Boys::calculateBoys(max_L_total, T, F);
-                    computeAuxiliaryIntegrals(max_L_total, max_L_total, max_L_total, delta, P_ab - P_cd, F, R_buffer);
-
-                    for (size_t a = 0; a < naoA; ++a)
+                    for (size_t b = 0; b < naoB; ++b)
                     {
-                        const unsigned i  = shellA.aoOffset + a;
-                        const unsigned l1 = lx[shellA.aoOffset + a];
-                        const unsigned m1 = ly[shellA.aoOffset + a];
-                        const unsigned n1 = lz[shellA.aoOffset + a];
-                        const double cA   = coeffs[(shellA.coeffOffset + pA * naoA) + a];
+                        const unsigned j = shellB.aoOffset + b;
+                        if (&shellA == &shellB && j > i) // Exploit permutational symmetry
+                            continue;
 
-                        for (size_t b = 0; b < naoB; ++b)
+                        const unsigned l2 = lx[shellB.aoOffset + b];
+                        const unsigned m2 = ly[shellB.aoOffset + b];
+                        const unsigned n2 = lz[shellB.aoOffset + b];
+
+                        for (size_t c = 0; c < naoC; ++c)
                         {
-                            const unsigned j = shellB.aoOffset + b;
-                            if (&shellA == &shellB && j > i) // Exploit permutational symmetry
-                                continue;
+                            const unsigned k  = shellC.aoOffset + c;
+                            const unsigned l3 = lx[shellC.aoOffset + c];
+                            const unsigned m3 = ly[shellC.aoOffset + c];
+                            const unsigned n3 = lz[shellC.aoOffset + c];
 
-                            const unsigned l2 = lx[shellB.aoOffset + b];
-                            const unsigned m2 = ly[shellB.aoOffset + b];
-                            const unsigned n2 = lz[shellB.aoOffset + b];
-                            const double cB   = coeffs[(shellB.coeffOffset + pB * naoB) + b];
-
-                            for (size_t c = 0; c < naoC; ++c)
+                            for (size_t d = 0; d < naoD; ++d)
                             {
-                                const unsigned k  = shellC.aoOffset + c;
-                                const unsigned l3 = lx[shellC.aoOffset + c];
-                                const unsigned m3 = ly[shellC.aoOffset + c];
-                                const unsigned n3 = lz[shellC.aoOffset + c];
-                                const double cC   = coeffs[(shellC.coeffOffset + pC * naoC) + c];
+                                const unsigned l = shellD.aoOffset + d;
 
-                                for (size_t d = 0; d < naoD; ++d)
+                                // Exploit permutational symmetry
+                                if (&shellC == &shellD && l > k)
+                                    continue;
+                                if (((&shellA == &shellC && &shellB == &shellD) || (&shellA == &shellD && &shellB == &shellC))
+                                    && (i * (i + 1) / 2 + j) < (k * (k + 1) / 2 + l))
+                                    continue;
+
+                                const unsigned l4 = lx[shellD.aoOffset + d];
+                                const unsigned m4 = ly[shellD.aoOffset + d];
+                                const unsigned n4 = lz[shellD.aoOffset + d];
+
+                                double prim_int = 0.0;
+#pragma omp simd reduction(+ : prim_int)
+                                for (unsigned v1 = 0; v1 <= n1 + n2; ++v1)
                                 {
-                                    const unsigned l = shellD.aoOffset + d;
-
-                                    // Exploit permutational symmetry
-                                    if (&shellC == &shellD && l > k)
-                                        continue;
-                                    if (((&shellA == &shellC && &shellB == &shellD)
-                                         || (&shellA == &shellD && &shellB == &shellC))
-                                        && ((i * (i + 1) / 2) + j) < ((k * (k + 1) / 2) + l))
-                                        continue;
-
-                                    const unsigned l4 = lx[shellD.aoOffset + d];
-                                    const unsigned m4 = ly[shellD.aoOffset + d];
-                                    const unsigned n4 = lz[shellD.aoOffset + d];
-                                    const double cD   = coeffs[(shellD.coeffOffset + pD * naoD) + d];
-
-
-                                    double prim_int = 0.0;
-                                    for (unsigned t1 = 0; t1 <= l1 + l2; ++t1)
+                                    double sum_u1 = 0.0;
+#pragma omp simd reduction(+ : sum_u1)
+                                    for (unsigned u1 = 0; u1 <= m1 + m2; ++u1)
                                     {
-                                        double sum_u1 = 0.0;
-                                        for (unsigned u1 = 0; u1 <= m1 + m2; ++u1)
+                                        double sum_t1 = 0.0;
+#pragma omp simd reduction(+ : sum_t1)
+                                        for (unsigned t1 = 0; t1 <= l1 + l2; ++t1)
                                         {
-                                            double sum_v1 = 0.0;
-                                            for (unsigned v1 = 0; v1 <= n1 + n2; ++v1)
+                                            double tmp = 0.0;
+#pragma omp simd reduction(+ : tmp)
+                                            for (unsigned v2 = 0; v2 <= n3 + n4; ++v2)
                                             {
-                                                double tmp = 0.0;
-                                                for (unsigned t2 = 0; t2 <= l3 + l4; ++t2)
+                                                double sum_u2 = 0.0;
+#pragma omp simd reduction(+ : sum_u2)
+                                                for (unsigned u2 = 0; u2 <= m3 + m4; ++u2)
                                                 {
-                                                    double sum_u2 = 0.0;
-                                                    for (unsigned u2 = 0; u2 <= m3 + m4; ++u2)
+                                                    double sum_t2 = 0.0;
+#pragma omp simd reduction(+ : sum_t2)
+                                                    for (unsigned t2 = 0; t2 <= l3 + l4; ++t2)
                                                     {
-                                                        double sum_v2 = 0.0;
-                                                        for (unsigned v2 = 0; v2 <= n3 + n4; ++v2)
-                                                        {
-                                                            int signFactor = (t2 + u2 + v2) % 2 == 0 ? 1 : -1;
-                                                            sum_v2 += signFactor * Ez_cd(n3, n4, v2)
-                                                                    * R_buffer(t1 + t2, u1 + u2, v1 + v2, 0);
-                                                        }
-                                                        sum_u2 += Ey_cd(m3, m4, u2) * sum_v2;
+                                                        int signFactor = (t2 + u2 + v2) % 2 == 0 ? 1 : -1;
+                                                        sum_t2 += signFactor * Ex_cd(l3, l4, t2)
+                                                                * R_buffer(t1 + t2, u1 + u2, v1 + v2, 0);
                                                     }
-                                                    tmp += Ex_cd(l3, l4, t2) * sum_u2;
+                                                    sum_u2 += Ey_cd(m3, m4, u2) * sum_t2;
                                                 }
-                                                sum_v1 += Ez_ab(n1, n2, v1) * tmp;
+                                                tmp += Ez_cd(n3, n4, v2) * sum_u2;
                                             }
-                                            sum_u1 += Ey_ab(m1, m2, u1) * sum_v1;
+                                            sum_t1 += Ex_ab(l1, l2, t1) * tmp;
                                         }
-                                        prim_int += Ex_ab(l1, l2, t1) * sum_u1;
+                                        sum_u1 += Ey_ab(m1, m2, u1) * sum_t1;
                                     }
-
-                                    G(i, j, k, l) += cA * cB * cC * cD * prefactor * prim_int;
+                                    prim_int += Ez_ab(n1, n2, v1) * sum_u1;
                                 }
+                                prim_integrals[a * naoBCD + b * naoCD + c * naoD + d] = prim_int;
+                            }
+                        }
+                    }
+                }
+
+                // Contract Integrals
+                for (size_t a = 0; a < naoA; ++a)
+                {
+                    const unsigned i = shellA.aoOffset + a;
+                    const double cA  = coeffs[(shellA.coeffOffset + pA * naoA) + a];
+
+                    for (size_t b = 0; b < naoB; ++b)
+                    {
+                        const unsigned j = shellB.aoOffset + b;
+
+                        if (&shellA == &shellB && j > i)
+                            continue;
+
+                        const double cB = coeffs[(shellB.coeffOffset + pB * naoB) + b];
+
+                        for (size_t c = 0; c < naoC; ++c)
+                        {
+                            const unsigned k = shellC.aoOffset + c;
+                            const double cC  = coeffs[(shellC.coeffOffset + pC * naoC) + c];
+
+                            for (size_t d = 0; d < naoD; ++d)
+                            {
+                                const unsigned l = shellD.aoOffset + d;
+
+                                if (&shellC == &shellD && l > k)
+                                    continue;
+
+                                if (((&shellA == &shellC && &shellB == &shellD) || (&shellA == &shellD && &shellB == &shellC))
+                                    && (i * (i + 1) / 2 + j) < (k * (k + 1) / 2 + l))
+                                    continue;
+
+                                const double cD = coeffs[(shellD.coeffOffset + pD * naoD) + d];
+
+                                G(i, j, k, l) += cA * cB * cC * cD * prefactor
+                                               * prim_integrals[a * naoBCD + b * naoCD + c * naoD + d];
                             }
                         }
                     }
@@ -385,73 +490,32 @@ void IntegralEngine::electronRepulsion(
     }
 }
 
+
 IntegralEngine::PrimitivePairData IntegralEngine::computePrimitivePairData(
-    double alpha1, const Eigen::Vector3d& A, double alpha2, const Eigen::Vector3d& B
+    double alpha1, double xa, double ya, double za, double alpha2, double xb, double yb, double zb
 )
 {
     double p    = alpha1 + alpha2;
     double oo_p = 1.0 / p; // one over p
 
-    Eigen::Vector3d P  = (alpha1 * A + alpha2 * B) * oo_p;
-    Eigen::Vector3d PA = P - A;
-    Eigen::Vector3d PB = P - B;
+    double Px = (alpha1 * xa + alpha2 * xb) * oo_p;
+    double Py = (alpha1 * ya + alpha2 * yb) * oo_p;
+    double Pz = (alpha1 * za + alpha2 * zb) * oo_p;
 
-    double AmB2 = (A - B).squaredNorm();
+    double PAx = Px - xa;
+    double PAy = Py - ya;
+    double PAz = Pz - za;
+
+    double PBx = Px - xb;
+    double PBy = Py - yb;
+    double PBz = Pz - zb;
+
+    double AmB2 = (xa - xb) * (xa - xb) + (ya - yb) * (ya - yb) + (za - zb) * (za - zb);
     double K    = std::exp(-alpha1 * alpha2 * oo_p * AmB2);
 
-    return {.p = p, .K = K, .P = P, .PA = PA, .PB = PB};
+    return {.p = p, .K = K, .Px = Px, .Py = Py, .Pz = Pz, .PAx = PAx, .PAy = PAy, .PAz = PAz, .PBx = PBx, .PBy = PBy, .PBz = PBz};
 }
 
-// namespace
-// {
-// double SQRT_PI_BY_2 = std::sqrt(M_PI) / 2.0;
-//
-// std::array<double, 82> TRANSITION_VALUES = {
-//     2.35,  2.35,  2.35,  2.35,  2.38,  2.82,  3.05,  3.72,  3.76,  4.01,  4.61,  4.92,  5.15,  5.63,
-//     6.02,  6.33,  6.83,  7.15,  7.43,  7.94,  8.27,  8.59,  8.88,  9.21,  9.84,  9.99,  10.40, 10.71,
-//     11.15, 11.54, 11.88, 12.37, 12.69, 13.21, 13.42, 13.81, 14.25, 14.65, 14.97, 15.31, 15.84, 15.96,
-//     16.22, 16.69, 17.15, 17.49, 17.92, 18.28, 18.61, 18.85, 19.18, 19.68, 19.94, 20.53, 20.73, 21.25,
-//     21.54, 21.89, 22.29, 22.72, 23.07, 23.44, 23.90, 24.17, 24.56, 24.85, 25.23, 25.63, 25.96, 26.43,
-//     26.78, 27.09, 27.56, 27.89, 28.27, 28.71, 29.00, 29.38, 29.84, 30.22, 30.56, 30.85
-// };
-//
-// } // namespace
-//
-// /**
-//  * This implementation is based on:
-//  * Weiss, A. K., & Ochsenfeld, C. (2015). A rigorous and optimized strategy for the evaluation of the B oys function
-//  * kernel in molecular electronic structure theory. Journal of Computational Chemistry, 36(18), 1390-1398.
-//  */
-// void IntegralEngine::calculateBoys(unsigned m_max, double T, std::span<double> F)
-// {
-//     if (T > 30.0)
-//     {
-//         // For large T, use the asymptotic expansion.
-//         F[0] = SQRT_PI_BY_2 / std::sqrt(T);
-//         for (unsigned m = 1; m <= m_max; ++m) { F[m] = (m + 0.5) * F[m - 1] / T; }
-//         return;
-//     }
-//
-//     if (m_max == 0)
-//     {
-//         double sqrt_T = std::sqrt(T);
-//         F[0]          = SQRT_PI_BY_2 * std::erf(sqrt_T) / sqrt_T;
-//         return;
-//     }
-//
-//     if (T <= TRANSITION_VALUES[m_max - 1])
-//     {
-//         // use upwards recursion
-//         double sqrt_T = std::sqrt(T);
-//         F[0]          = SQRT_PI_BY_2 * std::erf(sqrt_T) / sqrt_T;
-//         for (unsigned m = 0; m < m_max; ++m) { F[m + 1] = ((2.0 * m + 1.0) * F[m] - std::exp(-T)) / (2.0 * T); }
-//         return;
-//     }
-//
-//     // use downward recursion
-//     F[m_max] = dfact((2 * m_max) - 1) * std::sqrt(M_PI) / (std::pow(2, m_max + 1) * std::pow(T, m_max + 0.5));
-//     for (unsigned m = m_max; m >= 1; --m) { F[m - 1] = ((2 * T * F[m]) + std::exp(-T)) / ((2 * (m - 1)) + 1); }
-// }
 
 void IntegralEngine::computeHermiteCoeffs(unsigned l1, unsigned l2, double p, double PA, double PB, EBuffer& E_buffer)
 {
@@ -496,75 +560,6 @@ void IntegralEngine::computeHermiteCoeffs(unsigned l1, unsigned l2, double p, do
     }
 }
 
-// namespace
-// {
-//
-// double E(int i, int l1, int l2, double Q, double exponentA, double exponentB)
-// {
-//     if (i < 0 || i > (l1 + l2) || l1 < 0 || l2 < 0)
-//     {
-//         // out out bounds
-//         return 0.0;
-//     }
-//     else if (i == 0 && l1 == 0 && l2 == 0)
-//     {
-//         // base case
-//         return 1.0;
-//     }
-//
-//     double p = exponentA + exponentB;
-//     double q = (exponentA * exponentB) / p;
-//
-//     double result = 0.0;
-//     if (l2 == 0)
-//     {
-//         // decrement l1
-//         result = ((1.0 / (2.0 * p)) * E(i - 1, l1 - 1, l2, Q, exponentA, exponentB))
-//                - ((q * Q / exponentA) * E(i, l1 - 1, l2, Q, exponentA, exponentB))
-//                + ((i + 1) * E(i + 1, l1 - 1, l2, Q, exponentA, exponentB));
-//     }
-//     else
-//     {
-//         // decrement l2
-//         result = ((1.0 / (2.0 * p)) * E(i - 1, l1, l2 - 1, Q, exponentA, exponentB))
-//                + ((q * Q / exponentB) * E(i, l1, l2 - 1, Q, exponentA, exponentB))
-//                + ((i + 1) * E(i + 1, l1, l2 - 1, Q, exponentA, exponentB));
-//     }
-//
-//     return result;
-// }
-
-// double R(int t, int u, int v, int n, double p, const Vec3& PC, double T)
-// {
-//     if (t < 0 || u < 0 || v < 0)
-//     {
-//         return 0.0;
-//     }
-//
-//     double result = 0.0;
-//     if (t == 0 && u == 0 && v == 0)
-//     {
-//         // base case
-//         result = std::pow(-2.0 * p, n) * boys(n, T);
-//     }
-//     else if (t > 0)
-//     {
-//         result = ((t - 1) * R(t - 2, u, v, n + 1, p, PC, T)) + (PC.x() * R(t - 1, u, v, n + 1, p, PC, T));
-//     }
-//     else if (u > 0)
-//     {
-//         result = ((u - 1) * R(t, u - 2, v, n + 1, p, PC, T)) + (PC.y() * R(t, u - 1, v, n + 1, p, PC, T));
-//     }
-//     else // v > 0
-//     {
-//         result = ((v - 1) * R(t, u, v - 2, n + 1, p, PC, T)) + (PC.z() * R(t, u, v - 1, n + 1, p, PC, T));
-//     }
-//
-//     return result;
-// }
-
-// } // namespace
-
 
 void IntegralEngine::computeAuxiliaryIntegrals(
     unsigned t_max, unsigned u_max, unsigned v_max, double p, const Vec3& PC, std::span<double> F, RBuffer& R_buffer
@@ -583,7 +578,8 @@ void IntegralEngine::computeAuxiliaryIntegrals(
     unsigned n = n_max;
     while (n-- > 0)
     {
-        // Build up t dimension from t=1 up to max_t
+// Build up t dimension from t=1 up to max_t
+#pragma omp simd
         for (unsigned t = 1; t <= t_max; ++t)
         {
             R_buffer(t, 0, 0, n) = PC.x() * R_buffer(t - 1, 0, 0, n + 1);
@@ -594,6 +590,7 @@ void IntegralEngine::computeAuxiliaryIntegrals(
         // Build up u dimension
         for (unsigned u = 1; u <= u_max; ++u)
         {
+#pragma omp simd
             for (unsigned t = 0; t <= t_max; ++t)
             {
                 R_buffer(t, u, 0, n) = PC.y() * R_buffer(t, u - 1, 0, n + 1);
@@ -607,6 +604,7 @@ void IntegralEngine::computeAuxiliaryIntegrals(
         {
             for (unsigned u = 0; u <= u_max; ++u)
             {
+#pragma omp simd
                 for (unsigned t = 0; t <= t_max; ++t)
                 {
                     R_buffer(t, u, v, n) = PC.z() * R_buffer(t, u, v - 1, n + 1);

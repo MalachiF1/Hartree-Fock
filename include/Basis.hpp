@@ -25,7 +25,6 @@ struct RawShell
 struct Shell
 {
     unsigned l;
-    Eigen::Vector3d center;
     size_t nao;
     size_t nprim;
     size_t primOffset;
