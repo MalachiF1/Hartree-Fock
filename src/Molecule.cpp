@@ -475,7 +475,7 @@ ElectronRepulsionTensor Molecule::electronRepulsionTensor(double threshold) cons
                 for (size_t l = 0; l < sc; ++l)
                 {
                     // no need to recalculate identical elements of the tensor (enforce quartet symmetry)
-                    if (j > i || l > k || ((i * (i + 1) / 2) + j) < ((k * (k + 1) / 2) + l))
+                    if (j > i || l > k || (i * (i + 1) / 2 + j) < (k * (k + 1) / 2 + l))
                         continue;
 
                     // make sure we did not already calculate this integral in Schwartz screening loop
@@ -526,20 +526,50 @@ ElectronRepulsionTensor Molecule::electronRepulsionTensor(double threshold) cons
 
 Eigen::MatrixXd Molecule::schwartzScreeningMatrix() const
 {
-    size_t N_ao = basisFunctionCount;
+    // size_t N_ao = basisFunctionCount;
 
     // Pre-calculate Schwartz screening matrix
-    Eigen::MatrixXd Q(N_ao, N_ao);
+    //     Eigen::MatrixXd Q(N_ao, N_ao);
+    // #pragma omp parallel for collapse(2)
+    //     for (size_t i = 0; i < N_ao; ++i)
+    //     {
+    //         for (size_t j = 0; j <= i; ++j)
+    //         {
+    //             double integral = AtomicOrbital::electronRepulsion(
+    //                 atomicOrbitals[i], atomicOrbitals[j], atomicOrbitals[i], atomicOrbitals[j]
+    //             );
+    //             Q(i, j) = Q(j, i) = std::sqrt(integral);
+    //         }
+    //     }
+    //     return Q;
+
+    size_t sc  = basis.getShellCount();
+    size_t Nao = basis.getAOCount();
+    Eigen::MatrixXd Q_test(sc, sc);
+    ElectronRepulsionTensor Vee_test(Nao);
+    const std::vector<Shell>& shells = basis.getShells();
+
 #pragma omp parallel for collapse(2)
-    for (size_t i = 0; i < N_ao; ++i)
+    for (size_t i = 0; i < sc; ++i)
     {
         for (size_t j = 0; j <= i; ++j)
         {
-            double integral = AtomicOrbital::electronRepulsion(
-                atomicOrbitals[i], atomicOrbitals[j], atomicOrbitals[i], atomicOrbitals[j]
-            );
-            Q(i, j) = Q(j, i) = std::sqrt(integral);
+            IntegralEngine::electronRepulsion(basis, shells[i], shells[j], shells[i], shells[j], Vee_test);
+
+            double maxVal = 0;
+            for (size_t a = 0; a < shells[i].nao; ++a)
+            {
+                for (size_t b = 0; b < shells[j].nao; ++b)
+                {
+                    double val = Vee_test(
+                        shells[i].aoOffset + a, shells[j].aoOffset + b, shells[i].aoOffset + a, shells[j].aoOffset + b
+                    );
+                    maxVal = std::max(maxVal, val);
+                }
+            }
+
+            Q_test(i, j) = Q_test(j, i) = std::sqrt(maxVal);
         }
     }
-    return Q;
+    return Q_test;
 }

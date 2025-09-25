@@ -23,6 +23,15 @@ class IntegralEngine
         ElectronRepulsionTensor& G
     );
 
+    static void electronRepulsion(
+        const Basis& basis,
+        const Shell& shellA,
+        const Shell& shellB,
+        const Shell& shellC,
+        const Shell& shellD,
+        std::vector<double>& G
+    );
+
   private:
     /**
      * @brief Holds precomputed values for a primitive Gaussian pair (a, b).

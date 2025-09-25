@@ -188,6 +188,8 @@ class Molecule
     // Getters for molecule properties
     const std::vector<AtomicOrbital>& getAtomicOrbitals() const { return atomicOrbitals; }
     size_t getBasisFunctionCount() const { return basisFunctionCount; }
+    size_t getShellCount() const { return basis.getShellCount(); }
+    const Basis& getBasis() const { return basis; }
     int getCharge() const { return charge; }
     size_t getMultiplicity() const { return multiplicity; }
     double getSymmetryTol() const { return symmetryTolerance; }

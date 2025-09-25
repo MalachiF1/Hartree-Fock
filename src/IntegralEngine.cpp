@@ -489,6 +489,248 @@ void IntegralEngine::electronRepulsion(
     }
 }
 
+void IntegralEngine::electronRepulsion(
+    const Basis& basis, const Shell& shellA, const Shell& shellB, const Shell& shellC, const Shell& shellD, std::vector<double>& G
+)
+{
+    const auto& exps   = basis.getExponents();
+    const auto& coeffs = basis.getCoefficients();
+    const auto& lx     = basis.getLx();
+    const auto& ly     = basis.getLy();
+    const auto& lz     = basis.getLz();
+    const auto& cx     = basis.getCx();
+    const auto& cy     = basis.getCy();
+    const auto& cz     = basis.getCz();
+
+    const size_t nprimA = shellA.nprim, naoA = shellA.nao;
+    const size_t nprimB = shellB.nprim, naoB = shellB.nao;
+    const size_t nprimC = shellC.nprim, naoC = shellC.nao;
+    const size_t nprimD = shellD.nprim, naoD = shellD.nao;
+
+    // Pre-calculate and cache all (cd) pair data
+    const size_t size = nprimC * nprimD;
+    std::vector<EBuffer> Ex_cd_vec(size, EBuffer(shellC.l, shellD.l));
+    std::vector<EBuffer> Ey_cd_vec(size, EBuffer(shellC.l, shellD.l));
+    std::vector<EBuffer> Ez_cd_vec(size, EBuffer(shellC.l, shellD.l));
+    std::vector<PrimitivePairData> primPairs_cd;
+    std::vector<size_t> pC_indices, pD_indices;
+    primPairs_cd.reserve(size);
+    pC_indices.reserve(size);
+    pD_indices.reserve(size);
+
+    for (size_t pC = 0; pC < nprimC; ++pC)
+    {
+        const double alphaC = exps[shellC.primOffset + pC];
+        const double cxC    = cx[shellC.primOffset + pC];
+        const double cyC    = cy[shellC.primOffset + pC];
+        const double czC    = cz[shellC.primOffset + pC];
+
+        for (size_t pD = 0; pD < nprimD; ++pD)
+        {
+            const double alphaD = exps[shellD.primOffset + pD];
+            const double cxD    = cx[shellD.primOffset + pD];
+            const double cyD    = cy[shellD.primOffset + pD];
+            const double czD    = cz[shellD.primOffset + pD];
+
+            pC_indices.emplace_back(pC);
+            pD_indices.emplace_back(pD);
+            primPairs_cd.emplace_back(computePrimitivePairData(alphaC, cxC, cyC, czC, alphaD, cxD, cyD, czD));
+            const size_t idx = (pC * nprimD) + pD;
+
+            computeHermiteCoeffs(
+                shellC.l, shellD.l, primPairs_cd[idx].p, primPairs_cd[idx].PAx, primPairs_cd[idx].PBx, Ex_cd_vec[idx]
+            );
+            computeHermiteCoeffs(
+                shellC.l, shellD.l, primPairs_cd[idx].p, primPairs_cd[idx].PAy, primPairs_cd[idx].PBy, Ey_cd_vec[idx]
+            );
+            computeHermiteCoeffs(
+                shellC.l, shellD.l, primPairs_cd[idx].p, primPairs_cd[idx].PAz, primPairs_cd[idx].PBz, Ez_cd_vec[idx]
+            );
+        }
+    }
+
+    // Allocate scratch space for (ab) pair and other intermediates
+    EBuffer Ex_ab(shellA.l, shellB.l), Ey_ab(shellA.l, shellB.l), Ez_ab(shellA.l, shellB.l);
+    const unsigned max_L_total = shellA.l + shellB.l + shellC.l + shellD.l;
+    RBuffer R_buffer(max_L_total, max_L_total, max_L_total);
+    std::vector<double> F(R_buffer.max_n + 1);
+
+    // Loop over (ab) primitive pairs
+    for (size_t pA = 0; pA < nprimA; ++pA)
+    {
+        const double alphaA = exps[shellA.primOffset + pA];
+        const double cxA    = cx[shellA.primOffset + pA];
+        const double cyA    = cy[shellA.primOffset + pA];
+        const double czA    = cz[shellA.primOffset + pA];
+
+        for (size_t pB = 0; pB < nprimB; ++pB)
+        {
+            const double alphaB = exps[shellB.primOffset + pB];
+            const double cxB    = cx[shellB.primOffset + pB];
+            const double cyB    = cy[shellB.primOffset + pB];
+            const double czB    = cz[shellB.primOffset + pB];
+
+            const PrimitivePairData primPair_ab = computePrimitivePairData(alphaA, cxA, cyA, czA, alphaB, cxB, cyB, czB);
+
+            computeHermiteCoeffs(shellA.l, shellB.l, primPair_ab.p, primPair_ab.PAx, primPair_ab.PBx, Ex_ab);
+            computeHermiteCoeffs(shellA.l, shellB.l, primPair_ab.p, primPair_ab.PAy, primPair_ab.PBy, Ey_ab);
+            computeHermiteCoeffs(shellA.l, shellB.l, primPair_ab.p, primPair_ab.PAz, primPair_ab.PBz, Ez_ab);
+
+            // Loop over cached (cd) pairs
+            for (size_t cd_idx = 0; cd_idx < primPairs_cd.size(); ++cd_idx)
+            {
+                const auto& primPair_cd = primPairs_cd[cd_idx];
+                const size_t pC         = pC_indices[cd_idx];
+                const size_t pD         = pD_indices[cd_idx];
+                const EBuffer& Ex_cd    = Ex_cd_vec[cd_idx];
+                const EBuffer& Ey_cd    = Ey_cd_vec[cd_idx];
+                const EBuffer& Ez_cd    = Ez_cd_vec[cd_idx];
+
+                const double prefactor = (2.0 * std::pow(M_PI, 2.5)
+                                          / (primPair_ab.p * primPair_cd.p * std::sqrt(primPair_ab.p + primPair_cd.p)))
+                                       * primPair_ab.K * primPair_cd.K;
+
+                const double delta = (primPair_ab.p * primPair_cd.p) / (primPair_ab.p + primPair_cd.p);
+                const auto P_ab    = Vec3(primPair_ab.Px, primPair_ab.Py, primPair_ab.Pz);
+                const auto P_cd    = Vec3(primPair_cd.Px, primPair_cd.Py, primPair_cd.Pz);
+                const double T     = delta * (P_ab - P_cd).squaredNorm();
+
+                Boys::calculateBoys(R_buffer.max_n, T, F);
+                computeAuxiliaryIntegrals(max_L_total, max_L_total, max_L_total, delta, P_ab - P_cd, F, R_buffer);
+
+                // Create a temporary tensor to store all primitive integrals for this quartet
+                std::vector<double> prim_integrals(naoA * naoB * naoC * naoD);
+
+                const unsigned naoCD  = naoC * naoD;
+                const unsigned naoBCD = naoB * naoCD;
+
+                for (size_t a = 0; a < naoA; ++a)
+                {
+                    const unsigned i  = shellA.aoOffset + a;
+                    const unsigned l1 = lx[shellA.aoOffset + a];
+                    const unsigned m1 = ly[shellA.aoOffset + a];
+                    const unsigned n1 = lz[shellA.aoOffset + a];
+
+                    for (size_t b = 0; b < naoB; ++b)
+                    {
+                        const unsigned j = shellB.aoOffset + b;
+                        if (&shellA == &shellB && j > i) // Exploit permutational symmetry
+                            continue;
+
+                        const unsigned l2 = lx[shellB.aoOffset + b];
+                        const unsigned m2 = ly[shellB.aoOffset + b];
+                        const unsigned n2 = lz[shellB.aoOffset + b];
+
+                        for (size_t c = 0; c < naoC; ++c)
+                        {
+                            const unsigned k  = shellC.aoOffset + c;
+                            const unsigned l3 = lx[shellC.aoOffset + c];
+                            const unsigned m3 = ly[shellC.aoOffset + c];
+                            const unsigned n3 = lz[shellC.aoOffset + c];
+
+                            for (size_t d = 0; d < naoD; ++d)
+                            {
+                                const unsigned l = shellD.aoOffset + d;
+
+                                // Exploit permutational symmetry
+                                if (&shellC == &shellD && l > k)
+                                    continue;
+                                if (((&shellA == &shellC && &shellB == &shellD) || (&shellA == &shellD && &shellB == &shellC))
+                                    && (i * (i + 1) / 2 + j) < (k * (k + 1) / 2 + l))
+                                    continue;
+
+                                const unsigned l4 = lx[shellD.aoOffset + d];
+                                const unsigned m4 = ly[shellD.aoOffset + d];
+                                const unsigned n4 = lz[shellD.aoOffset + d];
+
+                                double prim_int = 0.0;
+#pragma omp simd reduction(+ : prim_int)
+                                for (unsigned v1 = 0; v1 <= n1 + n2; ++v1)
+                                {
+                                    double sum_u1 = 0.0;
+#pragma omp simd reduction(+ : sum_u1)
+                                    for (unsigned u1 = 0; u1 <= m1 + m2; ++u1)
+                                    {
+                                        double sum_t1 = 0.0;
+#pragma omp simd reduction(+ : sum_t1)
+                                        for (unsigned t1 = 0; t1 <= l1 + l2; ++t1)
+                                        {
+                                            double tmp = 0.0;
+#pragma omp simd reduction(+ : tmp)
+                                            for (unsigned v2 = 0; v2 <= n3 + n4; ++v2)
+                                            {
+                                                double sum_u2 = 0.0;
+#pragma omp simd reduction(+ : sum_u2)
+                                                for (unsigned u2 = 0; u2 <= m3 + m4; ++u2)
+                                                {
+                                                    double sum_t2 = 0.0;
+#pragma omp simd reduction(+ : sum_t2)
+                                                    for (unsigned t2 = 0; t2 <= l3 + l4; ++t2)
+                                                    {
+                                                        int signFactor = (t2 + u2 + v2) % 2 == 0 ? 1 : -1;
+                                                        sum_t2 += signFactor * Ex_cd(l3, l4, t2)
+                                                                * R_buffer(t1 + t2, u1 + u2, v1 + v2, 0);
+                                                    }
+                                                    sum_u2 += Ey_cd(m3, m4, u2) * sum_t2;
+                                                }
+                                                tmp += Ez_cd(n3, n4, v2) * sum_u2;
+                                            }
+                                            sum_t1 += Ex_ab(l1, l2, t1) * tmp;
+                                        }
+                                        sum_u1 += Ey_ab(m1, m2, u1) * sum_t1;
+                                    }
+                                    prim_int += Ez_ab(n1, n2, v1) * sum_u1;
+                                }
+                                prim_integrals[a * naoBCD + b * naoCD + c * naoD + d] = prim_int;
+                            }
+                        }
+                    }
+                }
+
+                // Contract Integrals
+                for (size_t a = 0; a < naoA; ++a)
+                {
+                    const unsigned i = shellA.aoOffset + a;
+                    const double cA  = coeffs[(shellA.coeffOffset + pA * naoA) + a];
+
+                    for (size_t b = 0; b < naoB; ++b)
+                    {
+                        const unsigned j = shellB.aoOffset + b;
+
+                        if (&shellA == &shellB && j > i)
+                            continue;
+
+                        const double cB = coeffs[(shellB.coeffOffset + pB * naoB) + b];
+
+                        for (size_t c = 0; c < naoC; ++c)
+                        {
+                            const unsigned k = shellC.aoOffset + c;
+                            const double cC  = coeffs[(shellC.coeffOffset + pC * naoC) + c];
+
+                            for (size_t d = 0; d < naoD; ++d)
+                            {
+                                const unsigned l = shellD.aoOffset + d;
+
+                                if (&shellC == &shellD && l > k)
+                                    continue;
+
+                                if (((&shellA == &shellC && &shellB == &shellD) || (&shellA == &shellD && &shellB == &shellC))
+                                    && (i * (i + 1) / 2 + j) < (k * (k + 1) / 2 + l))
+                                    continue;
+
+                                const double cD = coeffs[(shellD.coeffOffset + pD * naoD) + d];
+
+                                G[a * naoBCD + b * naoCD + c * naoD + d] += cA * cB * cC * cD * prefactor
+                                                                          * prim_integrals[a * naoBCD + b * naoCD + c * naoD + d];
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 IntegralEngine::PrimitivePairData IntegralEngine::computePrimitivePairData(
     double alpha1, double xa, double ya, double za, double alpha2, double xb, double yb, double zb
 )
