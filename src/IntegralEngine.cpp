@@ -171,7 +171,7 @@ void IntegralEngine::nuclearAttraction(
 
     // Allocate scratch space
     RBuffer R_buffer(max_L_total, max_L_total, max_L_total);
-    std::vector<double> F(max_L_total + 1);
+    std::vector<double> F(R_buffer.max_n + 1);
     EBuffer Ex(shellA.l, shellB.l);
     EBuffer Ey(shellA.l, shellB.l);
     EBuffer Ez(shellA.l, shellB.l);
@@ -206,7 +206,7 @@ void IntegralEngine::nuclearAttraction(
                 const Eigen::Vector3d PC = Vec3(primPair.Px, primPair.Py, primPair.Pz) - C;
                 const double T           = primPair.p * PC.squaredNorm();
 
-                Boys::calculateBoys(max_L_total, T, F);
+                Boys::calculateBoys(R_buffer.max_n, T, F);
                 computeAuxiliaryIntegrals(max_L_total, max_L_total, max_L_total, primPair.p, PC, F, R_buffer);
 
                 for (size_t a = 0; a < naoA; ++a)
@@ -265,7 +265,6 @@ void IntegralEngine::electronRepulsion(
     const size_t nprimC = shellC.nprim, naoC = shellC.nao;
     const size_t nprimD = shellD.nprim, naoD = shellD.nao;
 
-
     // Pre-calculate and cache all (cd) pair data
     const size_t size = nprimC * nprimD;
     std::vector<EBuffer> Ex_cd_vec(size, EBuffer(shellC.l, shellD.l));
@@ -312,7 +311,7 @@ void IntegralEngine::electronRepulsion(
     EBuffer Ex_ab(shellA.l, shellB.l), Ey_ab(shellA.l, shellB.l), Ez_ab(shellA.l, shellB.l);
     const unsigned max_L_total = shellA.l + shellB.l + shellC.l + shellD.l;
     RBuffer R_buffer(max_L_total, max_L_total, max_L_total);
-    std::vector<double> F(max_L_total + 1);
+    std::vector<double> F(R_buffer.max_n + 1);
 
     // Loop over (ab) primitive pairs
     for (size_t pA = 0; pA < nprimA; ++pA)
@@ -354,7 +353,7 @@ void IntegralEngine::electronRepulsion(
                 const auto P_cd    = Vec3(primPair_cd.Px, primPair_cd.Py, primPair_cd.Pz);
                 const double T     = delta * (P_ab - P_cd).squaredNorm();
 
-                Boys::calculateBoys(max_L_total, T, F);
+                Boys::calculateBoys(R_buffer.max_n, T, F);
                 computeAuxiliaryIntegrals(max_L_total, max_L_total, max_L_total, delta, P_ab - P_cd, F, R_buffer);
 
                 // Create a temporary tensor to store all primitive integrals for this quartet
@@ -490,7 +489,6 @@ void IntegralEngine::electronRepulsion(
     }
 }
 
-
 IntegralEngine::PrimitivePairData IntegralEngine::computePrimitivePairData(
     double alpha1, double xa, double ya, double za, double alpha2, double xb, double yb, double zb
 )
@@ -516,7 +514,6 @@ IntegralEngine::PrimitivePairData IntegralEngine::computePrimitivePairData(
     return {.p = p, .K = K, .Px = Px, .Py = Py, .Pz = Pz, .PAx = PAx, .PAy = PAy, .PAz = PAz, .PBx = PBx, .PBy = PBy, .PBz = PBz};
 }
 
-
 void IntegralEngine::computeHermiteCoeffs(unsigned l1, unsigned l2, double p, double PA, double PB, EBuffer& E_buffer)
 {
     // Base case: E(0,0,0) = 1.0 (K factor is applied by the caller)
@@ -526,16 +523,19 @@ void IntegralEngine::computeHermiteCoeffs(unsigned l1, unsigned l2, double p, do
 
     for (unsigned i = 1; i <= l1; ++i)
     {
+        const size_t offset_im1 = E_buffer.getIOffset(i - 1);
+
         size_t t = i + 1;
         while (t-- > 0)
         {
             double val = 0.0;
             if (t <= i - 1)
-                val = PA * E_buffer(i - 1, 0, t);
+                val = PA * E_buffer.data[offset_im1 + t];
             if (t >= 1)
-                val += oo_2p * E_buffer(i - 1, 0, t - 1);
+                val += oo_2p * E_buffer.data[offset_im1 + t - 1];
             if (t + 1 <= i - 1)
-                val += (t + 1) * E_buffer(i - 1, 0, t + 1);
+                val += (t + 1) * E_buffer.data[offset_im1 + t + 1];
+
             E_buffer(i, 0, t) = val;
         }
     }
@@ -544,22 +544,25 @@ void IntegralEngine::computeHermiteCoeffs(unsigned l1, unsigned l2, double p, do
     {
         for (unsigned i = 0; i <= l1; ++i)
         {
+            const size_t offset_i   = E_buffer.getIOffset(i);
+            const size_t offset_jm1 = E_buffer.getJOffset(i, j - 1);
+
             size_t t = i + j + 1;
             while (t-- > 0)
             {
                 double val = 0.0;
                 if (t <= i + j - 1)
-                    val = PB * E_buffer(i, j - 1, t);
+                    val = PB * E_buffer.data[offset_i + offset_jm1 + t];
                 if (t >= 1)
-                    val += oo_2p * E_buffer(i, j - 1, t - 1);
+                    val += oo_2p * E_buffer.data[offset_i + offset_jm1 + t - 1];
                 if (t + 1 <= i + j - 1)
-                    val += (t + 1) * E_buffer(i, j - 1, t + 1);
+                    val += (t + 1) * E_buffer.data[offset_i + offset_jm1 + t + 1];
+
                 E_buffer(i, j, t) = val;
             }
         }
     }
 }
-
 
 void IntegralEngine::computeAuxiliaryIntegrals(
     unsigned t_max, unsigned u_max, unsigned v_max, double p, const Vec3& PC, std::span<double> F, RBuffer& R_buffer
@@ -570,32 +573,38 @@ void IntegralEngine::computeAuxiliaryIntegrals(
     // R_{t,u,v}^{n} = u-1 * R_{t,u-2,v}^{n+1} + (PC)_y * R_{t,u-1,v}^{n+1} (if u>0)
     // R_{t,u,v}^{n} = v-1 * R_{t,u,v-2}^{n+1} + (PC)_z * R_{t,u,v-1}^{n+1} (if v>0)
     // Base case: R_{0,0,0}^{n} = (-2p)^n * F[n]
-
+    //
     const unsigned n_max = t_max + u_max + v_max;
 
-    for (unsigned n = 0; n <= n_max; ++n) { R_buffer(0, 0, 0, n) = std::pow(-2.0 * p, n) * F[n]; }
+    double neg_2p       = -2.0 * p;
+    double neg_2p_pow_n = 1.0;
+    for (unsigned n = 0; n <= n_max; ++n)
+    {
+        R_buffer(0, 0, 0, n) = neg_2p_pow_n * F[n];
+        neg_2p_pow_n *= neg_2p;
+    }
 
     unsigned n = n_max;
     while (n-- > 0)
     {
-// Build up t dimension from t=1 up to max_t
-#pragma omp simd
+        // Build up t dimension from t=1 up to max_t
         for (unsigned t = 1; t <= t_max; ++t)
         {
-            R_buffer(t, 0, 0, n) = PC.x() * R_buffer(t - 1, 0, 0, n + 1);
+            double val = PC.x() * R_buffer(t - 1, 0, 0, n + 1);
             if (t >= 2)
-                R_buffer(t, 0, 0, n) += (t - 1) * R_buffer(t - 2, 0, 0, n + 1);
+                val += (t - 1) * R_buffer(t - 2, 0, 0, n + 1);
+            R_buffer(t, 0, 0, n) = val;
         }
 
         // Build up u dimension
         for (unsigned u = 1; u <= u_max; ++u)
         {
-#pragma omp simd
             for (unsigned t = 0; t <= t_max; ++t)
             {
-                R_buffer(t, u, 0, n) = PC.y() * R_buffer(t, u - 1, 0, n + 1);
+                double val = PC.y() * R_buffer(t, u - 1, 0, n + 1);
                 if (u >= 2)
-                    R_buffer(t, u, 0, n) += (u - 1) * R_buffer(t, u - 2, 0, n + 1);
+                    val += (u - 1) * R_buffer(t, u - 2, 0, n + 1);
+                R_buffer(t, u, 0, n) = val;
             }
         }
 
@@ -604,12 +613,18 @@ void IntegralEngine::computeAuxiliaryIntegrals(
         {
             for (unsigned u = 0; u <= u_max; ++u)
             {
-#pragma omp simd
-                for (unsigned t = 0; t <= t_max; ++t)
+                // Get pointers to the start of the relevant rows for efficiency
+                double* R_n_ptr        = &R_buffer(0, u, v, n);
+                const double* R_np1_v1 = &R_buffer(0, u, v - 1, n + 1);
+
+                if (v >= 2)
                 {
-                    R_buffer(t, u, v, n) = PC.z() * R_buffer(t, u, v - 1, n + 1);
-                    if (v >= 2)
-                        R_buffer(t, u, v, n) += (v - 1) * R_buffer(t, u, v - 2, n + 1);
+                    const double* R_np1_v2 = &R_buffer(0, u, v - 2, n + 1);
+                    for (unsigned t = 0; t <= t_max; ++t) { R_n_ptr[t] = PC.z() * R_np1_v1[t] + (v - 1) * R_np1_v2[t]; }
+                }
+                else
+                { // v is exactly 1
+                    for (unsigned t = 0; t <= t_max; ++t) { R_n_ptr[t] = PC.z() * R_np1_v1[t]; }
                 }
             }
         }

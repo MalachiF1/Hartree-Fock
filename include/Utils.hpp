@@ -96,7 +96,7 @@ Eigen::MatrixXd inverseSqrtMatrix(const Eigen::MatrixXd& S);
  * @param x The input value (double).
  * @return An approximation of e^x (double).
  */
-inline double SchraudolphExp(double x)
+inline double schraudolphExp(double x)
 {
     constexpr double a = (1ll << 52) / std::numbers::ln2;
     constexpr double b = (1ll << 52) * (1023 - 0.04367744890362246);

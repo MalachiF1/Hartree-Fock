@@ -49,7 +49,7 @@ void Boys::calculateBoys(unsigned m_max, double T, std::span<double> F)
 
     // double expMinusT;
     // if (T > EXP_CUTOFF)
-    //     expMinusT = SchraudolphExp(-T);
+    //     expMinusT = schraudolphExp(-T);
     // else
     // expMinusT = std::exp(-T);
 
@@ -57,7 +57,7 @@ void Boys::calculateBoys(unsigned m_max, double T, std::span<double> F)
 
     if (useDownwardRecursion)
     {
-        for (unsigned m = m_max; m >= 1; --m) { F[m - 1] = ((2 * T * F[m]) + expMinusT) / ((2 * (m - 1)) + 1); }
+        for (unsigned m = m_max; m >= 1; --m) { F[m - 1] = (2 * T * F[m] + expMinusT) / (2 * (m - 1) + 1); }
     }
     else
     {
@@ -81,7 +81,7 @@ double Boys::analyticalBoys(unsigned m, double T)
     {
         term *= T / (m + i + 0.5);
         sum += term;
-        if (std::abs(term) < 1e-14) // Convergence check.
+        if (std::abs(term) < 1e-15) // Convergence check.
             break;
     }
 
@@ -103,8 +103,8 @@ GridManager::GridManager()
         {
             for (size_t j = 0; j < numGridPoints; ++j)
             {
-                double T_j                    = j * GRID_STEP_DELTA;
-                grid[(i * numGridPoints) + j] = Boys::analyticalBoys(i, T_j);
+                double T_j                  = j * GRID_STEP_DELTA;
+                grid[i * numGridPoints + j] = Boys::analyticalBoys(i, T_j);
             }
         }
 
