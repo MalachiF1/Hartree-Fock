@@ -1,6 +1,5 @@
 #pragma once
 
-#include "AtomicOrbital.hpp"
 #include "Basis.hpp"
 #include "Utils.hpp"
 
@@ -186,7 +185,6 @@ class Molecule
     Eigen::MatrixXd schwartzScreeningMatrix() const;
 
     // Getters for molecule properties
-    const std::vector<AtomicOrbital>& getAtomicOrbitals() const { return atomicOrbitals; }
     size_t getBasisFunctionCount() const { return basisFunctionCount; }
     size_t getShellCount() const { return basis.getShellCount(); }
     const Basis& getBasis() const { return basis; }
@@ -214,14 +212,13 @@ class Molecule
      * @param basisName The name of the basis set to use (case insensitive).
      * @Throws std::runtime_error if the basis set is not found.
      */
-    void buildBasis(const std::string& basisName);
+    // void buildBasis(const std::string& basisName);
 
     const int charge;
     const int multiplicity;
     const double symmetryTolerance;
     std::vector<Atom> geometry;
     size_t electronCount;
-    std::vector<AtomicOrbital> atomicOrbitals;
     Basis basis;
     // PointGroup pointGroup;
     // PointGroup abelianSubgroup;
