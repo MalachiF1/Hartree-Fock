@@ -1,6 +1,7 @@
 #include "SCF.hpp"
 
 #include "DIIS.hpp"
+#include "IntegralEngine.hpp"
 #include "Utils.hpp"
 
 #include <cmath>
@@ -186,8 +187,8 @@ void SCF::computeInitialGuessDensity()
             Eigen::VectorXd homoAlpha = C_alpha.col(this->occupiedCountAlpha - 1);
             Eigen::VectorXd lumoAlpha = C_alpha.col(this->occupiedCountAlpha);
 
-            Eigen::VectorXd mixedHomo = (1 / (std::sqrt(1 + (k * k)))) * (homoAlpha + k * lumoAlpha);
-            Eigen::VectorXd mixedLumo = (1 / (std::sqrt(1 + (k * k)))) * (lumoAlpha - k * homoAlpha);
+            Eigen::VectorXd mixedHomo = (1 / (std::sqrt(1 + k * k))) * (homoAlpha + k * lumoAlpha);
+            Eigen::VectorXd mixedLumo = (1 / (std::sqrt(1 + k * k))) * (lumoAlpha - k * homoAlpha);
 
             C_alpha.col(this->occupiedCountAlpha - 1) = mixedHomo;
             C_alpha.col(this->occupiedCountAlpha)     = mixedLumo;
@@ -266,14 +267,36 @@ void SCF::buildFockMatrix()
 
 void SCF::buildFockMatrix(double schwartzThreshold, double densityThreshold)
 {
-    const size_t& N_ao = this->basisCount;
-    const auto& AOs    = this->molecule->getAtomicOrbitals();
+    const size_t N_ao    = this->basisCount;
+    const auto& basis    = this->molecule->getBasis();
+    const auto& shells   = basis.getShells();
+    const size_t nShells = shells.size();
 
     Eigen::MatrixXd J       = Eigen::MatrixXd::Zero(N_ao, N_ao);
     Eigen::MatrixXd K_alpha = Eigen::MatrixXd::Zero(N_ao, N_ao);
     Eigen::MatrixXd K_beta;
     if (this->options.unrestricted)
         K_beta = Eigen::MatrixXd::Zero(N_ao, N_ao);
+
+    // Pre-calculate the maximum density elements for each shell pair for density screening.
+    Eigen::MatrixXd D_max = Eigen::MatrixXd::Zero(nShells, nShells);
+#pragma omp parallel for collapse(2)
+    for (size_t s1 = 0; s1 < nShells; ++s1)
+    {
+        for (size_t s2 = 0; s2 <= s1; ++s2)
+        {
+            double maxVal = 0.0;
+            for (size_t a = shells[s1].aoOffset; a < shells[s1].aoOffset + shells[s1].nao; ++a)
+            {
+                for (size_t b = shells[s2].aoOffset; b < shells[s2].aoOffset + shells[s2].nao; ++b)
+                {
+                    maxVal = std::max(maxVal, std::abs(this->D_tot(a, b)));
+                }
+            }
+            D_max(s1, s2) = maxVal;
+            D_max(s2, s1) = maxVal;
+        }
+    }
 
 
 #pragma omp parallel
@@ -287,156 +310,183 @@ void SCF::buildFockMatrix(double schwartzThreshold, double densityThreshold)
 
 
 #pragma omp for collapse(4) schedule(dynamic, 64)
-        for (size_t i = 0; i < N_ao; ++i)
+        for (size_t a = 0; a < nShells; ++a)
         {
-            for (size_t j = 0; j < N_ao; ++j)
+            for (size_t b = 0; b < nShells; ++b)
             {
-                for (size_t k = 0; k < N_ao; ++k)
+                for (size_t c = 0; c < nShells; ++c)
                 {
-                    for (size_t l = 0; l < N_ao; ++l)
+                    for (size_t d = 0; d < nShells; ++d)
                     {
                         // Only calculate unique integrals
-                        if (j > i || l > k || ((i * (i + 1) / 2 + j) < (k * (k + 1) / 2 + l)))
+                        if (b > a || d > c || ((a * (a + 1) / 2 + b) < (c * (c + 1) / 2 + d)))
                             continue;
 
                         // Schwartz screening
-                        if (Q(i, j) * Q(k, l) < schwartzThreshold)
+                        if (Q(a, b) * Q(c, d) < schwartzThreshold)
                             continue;
 
                         // Density screening
-
-                        if (std::abs(this->D_tot(k, l)) < densityThreshold && std::abs(this->D_tot(i, j)) < densityThreshold
-                            && std::abs(this->D_tot(i, k)) < densityThreshold
-                            && std::abs(this->D_tot(i, l)) < densityThreshold && std::abs(this->D_tot(j, k)) < densityThreshold
-                            && std::abs(this->D_tot(j, l)) < densityThreshold)
+                        if (std::abs(D_max(c, d)) < densityThreshold && std::abs(D_max(a, b)) < densityThreshold
+                            && std::abs(D_max(a, c)) < densityThreshold && std::abs(D_max(a, d)) < densityThreshold
+                            && std::abs(D_max(b, c)) < densityThreshold && std::abs(D_max(b, d)) < densityThreshold)
                             continue;
 
+                        const auto& sa = shells[a];
+                        const auto& sb = shells[b];
+                        const auto& sc = shells[c];
+                        const auto& sd = shells[d];
 
-                        double eri = AtomicOrbital::electronRepulsion(AOs[i], AOs[j], AOs[k], AOs[l]);
+                        std::vector<double> ERIs(sa.nao * sb.nao * sc.nao * sd.nao, 0.0);
+                        IntegralEngine::electronRepulsion(basis, sa, sb, sc, sd, ERIs);
 
-                        if (i == j && j == k && k == l) // (ii|ii)
+                        const size_t naoCD  = sc.nao * sd.nao;
+                        const size_t naoBCD = sb.nao * naoCD;
+                        const size_t naoD   = sd.nao;
+
+                        for (size_t A = 0; A < sa.nao; ++A)
                         {
-                            J_p(i, i) += D_tot(i, i) * eri;
-                            K_alpha_p(i, i) += D_alpha(i, i) * eri;
+                            size_t i = sa.aoOffset + A;
+                            for (size_t B = 0; B < sb.nao; ++B)
+                            {
+                                size_t j = sb.aoOffset + B;
+                                for (size_t C = 0; C < sc.nao; ++C)
+                                {
+                                    size_t k = sc.aoOffset + C;
+                                    for (size_t D = 0; D < sd.nao; ++D)
+                                    {
+                                        size_t l = sd.aoOffset + D;
 
-                            if (this->options.unrestricted)
-                            {
-                                K_beta_p(i, i) += D_beta(i, i) * eri;
-                            }
-                        }
-                        else if (i == j && j == k) // (ii|il)
-                        {
-                            J_p(i, i) += 2 * this->D_tot(i, l) * eri;
-                            J_p(l, i) += this->D_tot(i, i) * eri;
-                            J_p(i, l) += this->D_tot(i, i) * eri;
-                            K_alpha_p(i, i) += 2 * this->D_alpha(i, l) * eri;
-                            K_alpha_p(l, i) += this->D_alpha(i, i) * eri;
-                            K_alpha_p(i, l) += this->D_alpha(i, i) * eri;
+                                        double eri = ERIs[A * naoBCD + B * naoCD + C * naoD + D];
 
-                            if (this->options.unrestricted)
-                            {
-                                K_beta_p(i, i) += 2 * this->D_beta(i, l) * eri;
-                                K_beta_p(l, i) += this->D_beta(i, i) * eri;
-                                K_beta_p(i, l) += this->D_beta(i, i) * eri;
-                            }
-                        }
-                        else if (i == j && k == l) // (ii|kk)
-                        {
-                            J_p(i, i) += this->D_tot(k, k) * eri;
-                            J_p(k, k) += this->D_tot(i, i) * eri;
-                            K_alpha_p(i, k) += this->D_alpha(i, k) * eri;
-                            K_alpha_p(k, i) += this->D_alpha(i, k) * eri;
+                                        if (i == j && j == k && k == l) // (ii|ii)
+                                        {
+                                            J_p(i, i) += D_tot(i, i) * eri;
+                                            K_alpha_p(i, i) += D_alpha(i, i) * eri;
 
-                            if (this->options.unrestricted)
-                            {
-                                K_beta_p(i, k) += this->D_beta(i, k) * eri;
-                                K_beta_p(k, i) += this->D_beta(i, k) * eri;
-                            }
-                        }
-                        else if (i == k && j == l) // (ij|ij)
-                        {
-                            // (ij|ij) = (ji|ij) = (ij|ji) = (ji|ji)
-                            J_p(i, j) += 2 * this->D_tot(i, j) * eri;
-                            J_p(j, i) += 2 * this->D_tot(i, j) * eri;
-                            K_alpha_p(i, j) += this->D_alpha(j, i) * eri;
-                            K_alpha_p(j, i) += this->D_alpha(i, j) * eri;
-                            K_alpha_p(i, i) += this->D_alpha(j, j) * eri;
-                            K_alpha_p(j, j) += this->D_alpha(i, i) * eri;
+                                            if (this->options.unrestricted)
+                                            {
+                                                K_beta_p(i, i) += D_beta(i, i) * eri;
+                                            }
+                                        }
+                                        else if (i == j && j == k) // (ii|il)
+                                        {
+                                            J_p(i, i) += 2 * this->D_tot(i, l) * eri;
+                                            J_p(l, i) += this->D_tot(i, i) * eri;
+                                            J_p(i, l) += this->D_tot(i, i) * eri;
+                                            K_alpha_p(i, i) += 2 * this->D_alpha(i, l) * eri;
+                                            K_alpha_p(l, i) += this->D_alpha(i, i) * eri;
+                                            K_alpha_p(i, l) += this->D_alpha(i, i) * eri;
 
-                            if (this->options.unrestricted)
-                            {
-                                K_beta_p(i, j) += this->D_beta(j, i) * eri;
-                                K_beta_p(j, i) += this->D_beta(i, j) * eri;
-                                K_beta_p(i, i) += this->D_beta(j, j) * eri;
-                                K_beta_p(j, j) += this->D_beta(i, i) * eri;
-                            }
-                        }
-                        else if (i == j) // (ii|kl)
-                        {
-                            J_p(i, i) += 2 * this->D_tot(k, l) * eri;
-                            J_p(k, l) += this->D_tot(i, i) * eri;
-                            J_p(l, k) += this->D_tot(i, i) * eri;
-                            K_alpha_p(i, l) += this->D_alpha(i, k) * eri;
-                            K_alpha_p(i, k) += this->D_alpha(i, l) * eri;
-                            K_alpha_p(k, i) += this->D_alpha(l, i) * eri;
-                            K_alpha_p(l, i) += this->D_alpha(k, i) * eri;
+                                            if (this->options.unrestricted)
+                                            {
+                                                K_beta_p(i, i) += 2 * this->D_beta(i, l) * eri;
+                                                K_beta_p(l, i) += this->D_beta(i, i) * eri;
+                                                K_beta_p(i, l) += this->D_beta(i, i) * eri;
+                                            }
+                                        }
+                                        else if (i == j && k == l) // (ii|kk)
+                                        {
+                                            J_p(i, i) += this->D_tot(k, k) * eri;
+                                            J_p(k, k) += this->D_tot(i, i) * eri;
+                                            K_alpha_p(i, k) += this->D_alpha(i, k) * eri;
+                                            K_alpha_p(k, i) += this->D_alpha(i, k) * eri;
 
-                            if (this->options.unrestricted)
-                            {
-                                K_beta_p(i, l) += this->D_beta(i, k) * eri;
-                                K_beta_p(i, k) += this->D_beta(i, l) * eri;
-                                K_beta_p(k, i) += this->D_beta(l, i) * eri;
-                                K_beta_p(l, i) += this->D_beta(k, i) * eri;
-                            }
-                        }
-                        else if (k == l) // (ij|kk)
-                        {
-                            J_p(i, j) += this->D_tot(k, k) * eri;
-                            J_p(j, i) += this->D_tot(k, k) * eri;
-                            J_p(k, k) += 2 * this->D_tot(i, j) * eri;
-                            K_alpha_p(i, k) += this->D_alpha(j, k) * eri;
-                            K_alpha_p(j, k) += this->D_alpha(i, k) * eri;
-                            K_alpha_p(k, j) += this->D_alpha(k, i) * eri;
-                            K_alpha_p(k, i) += this->D_alpha(k, j) * eri;
-                            if (this->options.unrestricted)
-                            {
-                                K_beta_p(i, k) += this->D_beta(j, k) * eri;
-                                K_beta_p(j, k) += this->D_beta(i, k) * eri;
-                                K_beta_p(k, j) += this->D_beta(k, i) * eri;
-                                K_beta_p(k, i) += this->D_beta(k, j) * eri;
-                            }
-                        }
-                        else // (ij|kl)
-                        {
-                            J_p(i, j) += 2 * this->D_tot(k, l) * eri;
-                            J_p(j, i) += 2 * this->D_tot(k, l) * eri;
-                            J_p(k, l) += 2 * this->D_tot(i, j) * eri;
-                            J_p(l, k) += 2 * this->D_tot(i, j) * eri;
-                            K_alpha_p(i, l) += this->D_alpha(j, k) * eri;
-                            K_alpha_p(j, l) += this->D_alpha(i, k) * eri;
-                            K_alpha_p(i, k) += this->D_alpha(j, l) * eri;
-                            K_alpha_p(j, k) += this->D_alpha(i, l) * eri;
-                            K_alpha_p(k, j) += this->D_alpha(l, i) * eri;
-                            K_alpha_p(l, j) += this->D_alpha(k, i) * eri;
-                            K_alpha_p(k, i) += this->D_alpha(l, j) * eri;
-                            K_alpha_p(l, i) += this->D_alpha(k, j) * eri;
+                                            if (this->options.unrestricted)
+                                            {
+                                                K_beta_p(i, k) += this->D_beta(i, k) * eri;
+                                                K_beta_p(k, i) += this->D_beta(i, k) * eri;
+                                            }
+                                        }
+                                        else if (i == k && j == l) // (ij|ij)
+                                        {
+                                            // (ij|ij) = (ji|ij) = (ij|ji) = (ji|ji)
+                                            J_p(i, j) += 2 * this->D_tot(i, j) * eri;
+                                            J_p(j, i) += 2 * this->D_tot(i, j) * eri;
+                                            K_alpha_p(i, j) += this->D_alpha(j, i) * eri;
+                                            K_alpha_p(j, i) += this->D_alpha(i, j) * eri;
+                                            K_alpha_p(i, i) += this->D_alpha(j, j) * eri;
+                                            K_alpha_p(j, j) += this->D_alpha(i, i) * eri;
 
-                            if (this->options.unrestricted)
-                            {
-                                K_beta_p(i, l) += this->D_beta(j, k) * eri;
-                                K_beta_p(j, l) += this->D_beta(i, k) * eri;
-                                K_beta_p(i, k) += this->D_beta(j, l) * eri;
-                                K_beta_p(j, k) += this->D_beta(i, l) * eri;
-                                K_beta_p(k, j) += this->D_beta(l, i) * eri;
-                                K_beta_p(l, j) += this->D_beta(k, i) * eri;
-                                K_beta_p(k, i) += this->D_beta(l, j) * eri;
-                                K_beta_p(l, i) += this->D_beta(k, j) * eri;
+                                            if (this->options.unrestricted)
+                                            {
+                                                K_beta_p(i, j) += this->D_beta(j, i) * eri;
+                                                K_beta_p(j, i) += this->D_beta(i, j) * eri;
+                                                K_beta_p(i, i) += this->D_beta(j, j) * eri;
+                                                K_beta_p(j, j) += this->D_beta(i, i) * eri;
+                                            }
+                                        }
+                                        else if (i == j) // (ii|kl)
+                                        {
+                                            J_p(i, i) += 2 * this->D_tot(k, l) * eri;
+                                            J_p(k, l) += this->D_tot(i, i) * eri;
+                                            J_p(l, k) += this->D_tot(i, i) * eri;
+                                            K_alpha_p(i, l) += this->D_alpha(i, k) * eri;
+                                            K_alpha_p(i, k) += this->D_alpha(i, l) * eri;
+                                            K_alpha_p(k, i) += this->D_alpha(l, i) * eri;
+                                            K_alpha_p(l, i) += this->D_alpha(k, i) * eri;
+
+                                            if (this->options.unrestricted)
+                                            {
+                                                K_beta_p(i, l) += this->D_beta(i, k) * eri;
+                                                K_beta_p(i, k) += this->D_beta(i, l) * eri;
+                                                K_beta_p(k, i) += this->D_beta(l, i) * eri;
+                                                K_beta_p(l, i) += this->D_beta(k, i) * eri;
+                                            }
+                                        }
+                                        else if (k == l) // (ij|kk)
+                                        {
+                                            J_p(i, j) += this->D_tot(k, k) * eri;
+                                            J_p(j, i) += this->D_tot(k, k) * eri;
+                                            J_p(k, k) += 2 * this->D_tot(i, j) * eri;
+                                            K_alpha_p(i, k) += this->D_alpha(j, k) * eri;
+                                            K_alpha_p(j, k) += this->D_alpha(i, k) * eri;
+                                            K_alpha_p(k, j) += this->D_alpha(k, i) * eri;
+                                            K_alpha_p(k, i) += this->D_alpha(k, j) * eri;
+                                            if (this->options.unrestricted)
+                                            {
+                                                K_beta_p(i, k) += this->D_beta(j, k) * eri;
+                                                K_beta_p(j, k) += this->D_beta(i, k) * eri;
+                                                K_beta_p(k, j) += this->D_beta(k, i) * eri;
+                                                K_beta_p(k, i) += this->D_beta(k, j) * eri;
+                                            }
+                                        }
+                                        else // (ij|kl)
+                                        {
+                                            J_p(i, j) += 2 * this->D_tot(k, l) * eri;
+                                            J_p(j, i) += 2 * this->D_tot(k, l) * eri;
+                                            J_p(k, l) += 2 * this->D_tot(i, j) * eri;
+                                            J_p(l, k) += 2 * this->D_tot(i, j) * eri;
+                                            K_alpha_p(i, l) += this->D_alpha(j, k) * eri;
+                                            K_alpha_p(j, l) += this->D_alpha(i, k) * eri;
+                                            K_alpha_p(i, k) += this->D_alpha(j, l) * eri;
+                                            K_alpha_p(j, k) += this->D_alpha(i, l) * eri;
+                                            K_alpha_p(k, j) += this->D_alpha(l, i) * eri;
+                                            K_alpha_p(l, j) += this->D_alpha(k, i) * eri;
+                                            K_alpha_p(k, i) += this->D_alpha(l, j) * eri;
+                                            K_alpha_p(l, i) += this->D_alpha(k, j) * eri;
+
+                                            if (this->options.unrestricted)
+                                            {
+                                                K_beta_p(i, l) += this->D_beta(j, k) * eri;
+                                                K_beta_p(j, l) += this->D_beta(i, k) * eri;
+                                                K_beta_p(i, k) += this->D_beta(j, l) * eri;
+                                                K_beta_p(j, k) += this->D_beta(i, l) * eri;
+                                                K_beta_p(k, j) += this->D_beta(l, i) * eri;
+                                                K_beta_p(l, j) += this->D_beta(k, i) * eri;
+                                                K_beta_p(k, i) += this->D_beta(l, j) * eri;
+                                                K_beta_p(l, i) += this->D_beta(k, j) * eri;
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
                 }
             }
         }
+
 #pragma omp critical(build_fock_direct)
         {
             // Accumulate the thread-local matrices into the global ones.
