@@ -3,6 +3,7 @@
 #include "Basis.hpp"
 #include "Utils.hpp"
 
+#include <algorithm>
 #include <string>
 #include <vector>
 
@@ -41,25 +42,17 @@ class ElectronRepulsionTensor : public std::vector<double>
      */
     double& operator()(size_t i, size_t j, size_t k, size_t l)
     {
-        // if i < j or k < l, swap i and j or k and l to maintain canonical indexing
-        if (i < j || k < l)
-        {
-            if (i < j)
-                std::swap(i, j);
-            if (k < l)
-                std::swap(k, l);
-        }
+        // Enforce i >= j and k >= l
+        const auto [j_, i_] = std::minmax(j, i);
+        const auto [l_, k_] = std::minmax(l, k);
 
-        // Calculate the index in the flattened vector
-        size_t big_I = (i * (i + 1) / 2) + j;
-        size_t big_K = (k * (k + 1) / 2) + l;
+        const size_t big_I = i_ * (i_ + 1) / 2 + j_;
+        const size_t big_K = k_ * (k_ + 1) / 2 + l_;
 
-        // if I < K, swap I and K to l to maintian canonical indexing
-        if (big_I < big_K)
-            std::swap(big_I, big_K);
+        // Enforce big_I >= big_K
+        const auto [big_K_, big_I_] = std::minmax(big_K, big_I);
 
-        // Calculate the index in the flattened vector
-        size_t index = (big_I * (big_I + 1) / 2) + big_K;
+        const size_t index = big_I_ * (big_I_ + 1) / 2 + big_K_;
         return std::vector<double>::operator[](index);
     };
 
@@ -75,25 +68,17 @@ class ElectronRepulsionTensor : public std::vector<double>
      */
     double const& operator()(size_t i, size_t j, size_t k, size_t l) const
     {
-        // if i < j or k < l, swap i and j or k and l to maintain canonical indexing
-        if (i < j || k < l)
-        {
-            if (i < j)
-                std::swap(i, j);
-            if (k < l)
-                std::swap(k, l);
-        }
+        // Enforce i >= j and k >= l
+        const auto [j_, i_] = std::minmax(j, i);
+        const auto [l_, k_] = std::minmax(l, k);
 
-        // Calculate the index in the flattened vector
-        size_t big_I = (i * (i + 1) / 2) + j;
-        size_t big_K = (k * (k + 1) / 2) + l;
+        const size_t big_I = i_ * (i_ + 1) / 2 + j_;
+        const size_t big_K = k_ * (k_ + 1) / 2 + l_;
 
-        // if I < K, swap I and K to l to maintian canonical indexing
-        if (big_I < big_K)
-            std::swap(big_I, big_K);
+        // Enforce big_I >= big_K
+        const auto [big_K_, big_I_] = std::minmax(big_K, big_I);
 
-        // Calculate the index in the flattened vector
-        size_t index = (big_I * (big_I + 1) / 2) + big_K;
+        const size_t index = big_I_ * (big_I_ + 1) / 2 + big_K_;
         return std::vector<double>::operator[](index);
     };
 
@@ -109,8 +94,8 @@ class ElectronRepulsionTensor : public std::vector<double>
         // The number of unique pairs (i, j) where i >= j
         size_t M = basisSize * (basisSize + 1) / 2;
 
-        // The number of unique quartets (i, j, k, l) where i >= j and k >= l
-        return M * (M + 1) / 2; // Total number of unique elements in the tensor
+        // The number of unique quartets (i, j, k, l) where i >= j, k >= l and (i, j) >= (k, l).
+        return M * (M + 1) / 2;
     }
 };
 

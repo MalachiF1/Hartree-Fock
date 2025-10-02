@@ -308,7 +308,7 @@ ElectronRepulsionTensor Molecule::electronRepulsionTensor(double threshold) cons
     size_t sc = basis.getShellCount();
     Eigen::MatrixXd Q(sc, sc);
     ElectronRepulsionTensor Vee(basisFunctionCount);
-    const std::vector<Shell>& shells = basis.getShells();
+    const auto& shells = basis.getShells();
 
 #pragma omp parallel for collapse(2)
     for (size_t i = 0; i < sc; ++i)
@@ -367,7 +367,7 @@ Eigen::MatrixXd Molecule::schwartzScreeningMatrix() const
 {
     size_t sc = basis.getShellCount();
     Eigen::MatrixXd Q(sc, sc);
-    const std::vector<Shell>& shells = basis.getShells();
+    const auto& shells = basis.getShells();
 
 #pragma omp parallel for collapse(2)
     for (size_t i = 0; i < sc; ++i)

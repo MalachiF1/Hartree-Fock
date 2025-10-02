@@ -4,7 +4,9 @@
 #include "IntegralEngine.hpp"
 #include "Utils.hpp"
 
+#include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <cstdlib>
 #include <fmt/core.h>
 #include <ios>
@@ -219,50 +221,294 @@ void SCF::computeInitialGuessDensity()
                            + 0.5 * (this->D_beta * (this->h + this->F_beta)).trace();
 }
 
-
 void SCF::buildFockMatrix()
 {
-    size_t N_ao             = this->basisCount;
-    Eigen::MatrixXd G_alpha = Eigen::MatrixXd::Zero(N_ao, N_ao);
-    Eigen::MatrixXd G_beta;
+    const size_t N_ao       = this->basisCount;
+    Eigen::MatrixXd J       = Eigen::MatrixXd::Zero(N_ao, N_ao);
+    Eigen::MatrixXd K_alpha = Eigen::MatrixXd::Zero(N_ao, N_ao);
+    Eigen::MatrixXd K_beta;
     if (this->options.unrestricted)
-        G_beta = Eigen::MatrixXd::Zero(N_ao, N_ao);
+        K_beta = Eigen::MatrixXd::Zero(N_ao, N_ao);
 
-// Calculate the G matrix (the two-electron part of the Fock matrix).
-#pragma omp parallel for collapse(2)
-    for (size_t i = 0; i < N_ao; ++i)
+#pragma omp parallel
     {
-        for (size_t j = 0; j < N_ao; ++j)
+        // Thread-local matrices to void data races
+        const double* const Dtot_ptr   = this->D_tot.data();
+        const double* const Dalpha_ptr = this->D_alpha.data();
+        const double* const Dbeta_ptr  = this->D_beta.data();
+        Eigen::MatrixXd J_p            = Eigen::MatrixXd::Zero(N_ao, N_ao);
+        double* const J_ptr            = J_p.data();
+        Eigen::MatrixXd K_alpha_p      = Eigen::MatrixXd::Zero(N_ao, N_ao);
+        double* const K_alpha_ptr      = K_alpha_p.data();
+        Eigen::MatrixXd K_beta_p;
+        double* K_beta_ptr = nullptr;
+        if (this->options.unrestricted)
         {
-            if (j <= i)
+            K_beta_p   = Eigen::MatrixXd::Zero(N_ao, N_ao);
+            K_beta_ptr = K_beta_p.data();
+        }
+
+#pragma omp for schedule(guided, 1) nowait
+        for (size_t i = 0; i < N_ao; ++i) // (ii|ii) contributions
+        {
+            const size_t big_I = i * (i + 1) / 2 + i;
+            const size_t index = big_I * (big_I + 1) / 2 + big_I;
+            const double eri   = this->Vee[index];
+
+            if (std::abs(eri) < this->options.schwartzThreshold)
+                continue;
+
+            const size_t ii_idx = i + i * N_ao;
+
+            J_ptr[ii_idx] += Dtot_ptr[ii_idx] * eri;
+            K_alpha_ptr[ii_idx] += Dalpha_ptr[ii_idx] * eri;
+
+            if (this->options.unrestricted)
             {
-                double G_alpha_ij = 0.0;
-                double G_beta_ij  = 0.0;
-                for (size_t k = 0; k < N_ao; ++k)
-                {
-                    for (size_t l = 0; l < N_ao; ++l)
-                    {
-                        double J_kl = this->Vee(i, j, k, l);
-                        double K_kl = this->Vee(i, k, j, l);
-                        G_alpha_ij += (this->D_alpha(k, l) + this->D_beta(k, l)) * J_kl - D_alpha(k, l) * K_kl;
-
-                        if (this->options.unrestricted)
-                            G_beta_ij += (this->D_alpha(k, l) + this->D_beta(k, l)) * J_kl - D_beta(k, l) * K_kl;
-                    }
-                }
-                G_alpha(i, j) = G_alpha(j, i) = G_alpha_ij;
-
-                if (this->options.unrestricted)
-                    G_beta(i, j) = G_beta(j, i) = G_beta_ij;
+                K_beta_ptr[ii_idx] += Dbeta_ptr[ii_idx] * eri;
             }
         }
-    }
-    this->F_alpha = this->h + G_alpha;
 
+#pragma omp for schedule(guided, 1) nowait
+        for (size_t i = 0; i < N_ao; ++i) // (ii|kk) contributions
+        {
+            const size_t iN_ao      = i * N_ao;
+            const size_t ii_idx     = i + iN_ao;
+            const size_t big_I      = i * (i + 1) / 2 + i;
+            const size_t index_base = big_I * (big_I + 1) / 2;
+
+            for (size_t k = 0; k < i; ++k)
+            {
+                const size_t big_K = k * (k + 1) / 2 + k;
+                const size_t index = index_base + big_K;
+                const double eri   = this->Vee[index];
+
+                if (std::abs(eri) < this->options.schwartzThreshold)
+                    continue;
+
+                const size_t kN_ao  = k * N_ao;
+                const size_t ki_idx = k + iN_ao;
+                const size_t kk_idx = k + kN_ao;
+
+                J_ptr[ii_idx] += Dtot_ptr[kk_idx] * eri;
+                J_ptr[kk_idx] += Dtot_ptr[ii_idx] * eri;
+                K_alpha_ptr[ki_idx] += Dalpha_ptr[ki_idx] * eri;
+
+                if (this->options.unrestricted)
+                {
+                    K_beta_ptr[ki_idx] += Dbeta_ptr[ki_idx] * eri;
+                }
+            }
+        }
+
+#pragma omp for schedule(guided, 1) nowait
+        for (size_t i = 0; i < N_ao; ++i) // (ij|ij) contributions
+        {
+            const size_t iN_ao      = i * N_ao;
+            const size_t ii_idx     = i + iN_ao;
+            const size_t big_I_base = i * (i + 1) / 2;
+
+            for (size_t j = 0; j < i; ++j)
+            {
+                const size_t big_I = big_I_base + j;
+                const size_t index = big_I * (big_I + 1) / 2 + big_I;
+                const double eri   = this->Vee[index];
+
+                if (std::abs(eri) < this->options.schwartzThreshold)
+                    continue;
+
+                const size_t jN_ao  = j * N_ao;
+                const size_t ji_idx = j + iN_ao;
+                const size_t jj_idx = j + jN_ao;
+
+                J_ptr[ji_idx] += 2 * Dtot_ptr[ji_idx] * eri;
+                K_alpha_ptr[ji_idx] += Dalpha_ptr[ji_idx] * eri;
+                K_alpha_ptr[ii_idx] += Dalpha_ptr[jj_idx] * eri;
+                K_alpha_ptr[jj_idx] += Dalpha_ptr[ii_idx] * eri;
+
+                if (this->options.unrestricted)
+                {
+                    K_beta_ptr[ji_idx] += Dbeta_ptr[ji_idx] * eri;
+                    K_beta_ptr[ii_idx] += Dbeta_ptr[jj_idx] * eri;
+                    K_beta_ptr[jj_idx] += Dbeta_ptr[ii_idx] * eri;
+                }
+            }
+        }
+
+#pragma omp for schedule(guided, 1) nowait
+        for (size_t i = 0; i < N_ao; ++i) // (ii|kl) contributions
+        {
+            const size_t iN_ao        = i * N_ao;
+            const size_t ii_idx       = i + iN_ao;
+            const size_t big_I        = i * (i + 1) / 2 + i;
+            const size_t index_base_i = big_I * (big_I + 1) / 2;
+
+            for (size_t k = 0; k <= i; ++k)
+            {
+                const size_t kN_ao      = k * N_ao;
+                const size_t ki_idx     = k + iN_ao;
+                const size_t big_K_base = k * (k + 1) / 2;
+                const size_t index_base = index_base_i + big_K_base;
+
+                for (size_t l = 0; l < k; ++l)
+                {
+                    const size_t index = index_base + l;
+                    const double eri   = this->Vee[index];
+
+                    if (std::abs(eri) < this->options.schwartzThreshold)
+                        continue;
+
+                    const size_t li_idx = l + iN_ao;
+                    const size_t lk_idx = l + kN_ao;
+
+                    const unsigned symFactor = i == k ? 2 : 1;
+
+                    J_ptr[ii_idx] += 2 * Dtot_ptr[lk_idx] * eri;
+                    J_ptr[lk_idx] += Dtot_ptr[ii_idx] * eri;
+                    K_alpha_ptr[li_idx] += Dalpha_ptr[ki_idx] * eri;
+                    K_alpha_ptr[ki_idx] += symFactor * Dalpha_ptr[li_idx] * eri;
+
+                    if (this->options.unrestricted)
+                    {
+                        K_beta_ptr[li_idx] += Dbeta_ptr[ki_idx] * eri;
+                        K_beta_ptr[ki_idx] += symFactor * Dbeta_ptr[li_idx] * eri;
+                    }
+                }
+            }
+        }
+
+#pragma omp for schedule(guided, 1) nowait
+        for (size_t i = 0; i < N_ao; ++i) // (ij|kk) contributions
+        {
+            const size_t iN_ao      = i * N_ao;
+            const size_t big_I_base = i * (i + 1) / 2;
+            for (size_t j = 0; j < i; ++j)
+            {
+                const size_t jN_ao      = j * N_ao;
+                const size_t ji_idx     = j + iN_ao;
+                const size_t big_I      = big_I_base + j;
+                const size_t index_base = big_I * (big_I + 1) / 2;
+
+                for (size_t k = 0; k < i; ++k)
+                {
+                    const size_t big_K = k * (k + 1) / 2 + k;
+                    const size_t index = index_base + big_K;
+                    const double eri   = this->Vee[index];
+
+                    if (std::abs(eri) < this->options.schwartzThreshold)
+                        continue;
+
+                    const size_t kN_ao  = k * N_ao;
+                    const size_t kk_idx = k + kN_ao;
+                    const size_t ki_idx = k + iN_ao;
+                    const size_t kj_idx = k + jN_ao;
+
+                    J_ptr[ji_idx] += Dtot_ptr[kk_idx] * eri;
+                    J_ptr[kk_idx] += 2 * Dtot_ptr[ji_idx] * eri;
+                    K_alpha_ptr[ki_idx] += Dalpha_ptr[kj_idx] * eri;
+
+                    size_t idx               = j < k ? j + kN_ao : kj_idx;
+                    const unsigned symFactor = j == k ? 2 : 1;
+                    K_alpha_ptr[idx] += symFactor * Dalpha_ptr[ki_idx] * eri;
+
+                    if (this->options.unrestricted)
+                    {
+                        K_beta_ptr[ki_idx] += Dbeta_ptr[kj_idx] * eri;
+                        K_beta_ptr[idx] += symFactor * Dbeta_ptr[ki_idx] * eri;
+                    }
+                }
+            }
+        }
+
+#pragma omp for schedule(guided, 1) nowait
+        for (size_t i = 0; i < N_ao; ++i) // (ij|kl) contributions
+        {
+            const size_t iN_ao      = i * N_ao;
+            const size_t big_I_base = i * (i + 1) / 2;
+            for (size_t j = 0; j < i; ++j)
+            {
+                const size_t jN_ao      = j * N_ao;
+                const size_t ji_idx     = j + iN_ao;
+                const size_t big_I      = big_I_base + j;
+                const size_t index_base = big_I * (big_I + 1) / 2;
+
+                for (size_t k = 0; k <= i; ++k)
+                {
+                    const size_t kN_ao      = k * N_ao;
+                    const size_t ki_idx     = k + iN_ao;
+                    const size_t kj_idx     = k + jN_ao;
+                    const size_t big_K_base = k * (k + 1) / 2;
+                    size_t index            = index_base + big_K_base;
+
+                    const size_t l_max = (i == k) ? j : k;
+                    for (size_t l = 0; l < l_max; ++l)
+                    {
+                        if (i == k && j == l) // exclude (ij|ij)
+                            continue;
+
+                        const double eri = this->Vee[index];
+                        index++;
+
+                        if (std::abs(eri) < this->options.schwartzThreshold)
+                            continue;
+
+                        const size_t li_idx = l + iN_ao;
+                        const size_t lj_idx = l + jN_ao;
+                        const size_t lk_idx = l + kN_ao;
+
+                        const unsigned symFactor_ik = i == k ? 2 : 1;
+                        const unsigned symFactor_jl = j == l ? 2 : 1;
+                        const unsigned symFactor_jk = j == k ? 2 : 1;
+
+                        J_ptr[ji_idx] += 2 * Dtot_ptr[lk_idx] * eri;
+                        J_ptr[lk_idx] += 2 * Dtot_ptr[ji_idx] * eri;
+                        K_alpha_ptr[li_idx] += Dalpha_ptr[kj_idx] * eri;
+
+                        K_alpha_ptr[ki_idx] += symFactor_ik * Dalpha_ptr[lj_idx] * eri;
+
+                        size_t idx1 = j < l ? j + l * N_ao : lj_idx;
+                        K_alpha_ptr[idx1] += symFactor_jl * Dalpha_ptr[ki_idx] * eri;
+
+                        size_t idx2 = j < k ? j + kN_ao : kj_idx;
+                        K_alpha_ptr[idx2] += symFactor_jk * Dalpha_ptr[li_idx] * eri;
+
+                        if (this->options.unrestricted)
+                        {
+                            K_beta_ptr[li_idx] += Dbeta_ptr[kj_idx] * eri;
+                            K_beta_ptr[idx1] += symFactor_jl * Dbeta_ptr[ki_idx] * eri;
+                            K_beta_ptr[ki_idx] += symFactor_ik * Dbeta_ptr[lj_idx] * eri;
+                            K_beta_ptr[idx2] += symFactor_jk * Dbeta_ptr[li_idx] * eri;
+                        }
+                    }
+                }
+            }
+        }
+
+#pragma omp critical(build_fock_conventional)
+        {
+            // Accumulate the thread-local matrices into the global ones.
+            J += J_p;
+            K_alpha += K_alpha_p;
+            if (this->options.unrestricted)
+                K_beta += K_beta_p;
+        }
+    }
+
+    // Symmetrize J and K
+    J       = J.selfadjointView<Eigen::Upper>();
+    K_alpha = K_alpha.selfadjointView<Eigen::Upper>();
+
+    // Build Fock matrix
+    this->F_alpha = this->h + J - K_alpha;
     if (this->options.unrestricted)
-        this->F_beta = this->h + G_beta;
+    {
+        K_beta       = K_beta.selfadjointView<Eigen::Upper>();
+        this->F_beta = this->h + J - K_beta;
+    }
     else
+    {
         this->F_beta = this->F_alpha;
+    }
 }
 
 void SCF::buildFockMatrix(double schwartzThreshold, double densityThreshold)
