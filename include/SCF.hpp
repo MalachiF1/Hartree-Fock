@@ -82,14 +82,19 @@ class SCF
     double DIISError;                  // Current DIIS error norm
     double electronicEnergy;           // Electronic energy
     Eigen::MatrixXd D_alpha;           // Density matrix
+    Eigen::MatrixXd D_alpha_prev;      // Density matrix of previous iteration
     Eigen::MatrixXd F_alpha;           // Fock matrix
+    Eigen::MatrixXd F_alpha_prev;      // Fock matrix of previous iteration
     Eigen::MatrixXd C_alpha;           // MO coefficient matrix
     Eigen::VectorXd eigenvalues_alpha; // Eigenvalues of the Fock matrix
     Eigen::MatrixXd D_beta;
+    Eigen::MatrixXd D_beta_prev;
     Eigen::MatrixXd F_beta;
+    Eigen::MatrixXd F_beta_prev;
     Eigen::MatrixXd C_beta;
     Eigen::VectorXd eigenvalues_beta;
-    Eigen::MatrixXd D_tot;      // D_alpha + D_beta
+    Eigen::MatrixXd D_tot; // D_alpha + D_beta
+    Eigen::MatrixXd D_tot_prev;
     double dampCoeff;           // Damping coefficient for the current iteration.
     bool useLevelShiftingAlpha; // Whether to use level shifting on F_alpha in the current iteration.
     bool useLevelShiftingBeta;  // Whether to use level shifting on F_beta in the current iteration.
@@ -118,7 +123,7 @@ class SCF
      * Builds the Fock matrix using the current density matrix and two-electron integrals.
      */
     void buildFockMatrix();
-    void buildFockMatrix(double schwartzThreshold, double densityThreshold); // overload for direct method
+    void buildFockMatrixDirect();
 
     /**
      * Diagonalizes the Fock matrix to obtain the molecular orbitals and updates the density matrix and coefficient matrix.

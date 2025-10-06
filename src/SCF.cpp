@@ -17,6 +17,7 @@ SCF::SCF(const Molecule& molecule, const SCFOptions& options, std::shared_ptr<Ou
 {
 }
 
+
 void SCF::run()
 {
     // Initialize the SCF calculation. (This should be called only once.)
@@ -49,11 +50,10 @@ void SCF::run()
     {
         // Store the energy and density from the previous iteration to check for convergence.
         double lastElectronicEnergy = this->electronicEnergy;
-        Eigen::MatrixXd D_last      = this->D_tot;
 
         // Build the new Fock matrix from the current density.
         if (this->options.direct)
-            this->buildFockMatrix(this->options.schwartzThreshold, this->options.densityThreshold);
+            this->buildFockMatrixDirect();
         else
             this->buildFockMatrix();
 
@@ -68,18 +68,16 @@ void SCF::run()
         }
 
         // Diagonalize the Fock matrix and compute the new density and coefficients.
-
         if (this->options.useDIIS)
         {
             // Extrapolate the orthogonal Fock matrix using DIIS.
             std::tie(this->F_alpha, this->F_beta) = diis_handler->extrapolate(this->F_alpha, this->F_beta);
         }
-
         this->diagonalizeAndUpdate();
 
         // Calculate the change in energy and density.
         this->deltaE = std::abs(this->electronicEnergy - lastElectronicEnergy);
-        this->deltaD = (this->D_tot - D_last).norm();
+        this->deltaD = (this->D_tot - D_tot_prev).norm();
         if (this->options.useDIIS)
             this->DIISError = diis_handler->getErrorNorm();
 
@@ -166,7 +164,8 @@ void SCF::initialize(double schwartzThreshold, bool direct)
 void SCF::computeInitialGuessDensity()
 {
     // The initial Fock matrix is just the core Hamiltonian.
-    this->F_alpha = this->h;
+    this->F_alpha      = this->h;
+    this->F_alpha_prev = this->F_alpha;
 
     // Diagonalize the initial Fock matrix to get guess orbitals.
     Eigen::MatrixXd F_alpha_prime = this->X.transpose() * this->F_alpha * this->X;
@@ -176,9 +175,10 @@ void SCF::computeInitialGuessDensity()
     Eigen::MatrixXd C_alpha_occ = this->C_alpha.leftCols(this->occupiedCountAlpha);
 
     // Form the density matrix from the occupied orbitals.
-    this->D_alpha = C_alpha_occ * C_alpha_occ.transpose();
+    this->D_alpha_prev = Eigen::MatrixXd::Zero(this->basisCount, this->basisCount);
+    this->D_alpha      = C_alpha_occ * C_alpha_occ.transpose();
 
-
+    this->D_beta_prev = Eigen::MatrixXd::Zero(this->basisCount, this->basisCount);
     if (this->options.unrestricted)
     {
         // HOMO-LUMO mixing for breaking symmetry in UHF.
@@ -189,8 +189,8 @@ void SCF::computeInitialGuessDensity()
             Eigen::VectorXd homoAlpha = C_alpha.col(this->occupiedCountAlpha - 1);
             Eigen::VectorXd lumoAlpha = C_alpha.col(this->occupiedCountAlpha);
 
-            Eigen::VectorXd mixedHomo = (1 / (std::sqrt(1 + k * k))) * (homoAlpha + k * lumoAlpha);
-            Eigen::VectorXd mixedLumo = (1 / (std::sqrt(1 + k * k))) * (lumoAlpha - k * homoAlpha);
+            Eigen::VectorXd mixedHomo = (1 / std::sqrt(1 + k * k)) * (homoAlpha + k * lumoAlpha);
+            Eigen::VectorXd mixedLumo = (1 / std::sqrt(1 + k * k)) * (lumoAlpha - k * homoAlpha);
 
             C_alpha.col(this->occupiedCountAlpha - 1) = mixedHomo;
             C_alpha.col(this->occupiedCountAlpha)     = mixedLumo;
@@ -199,6 +199,7 @@ void SCF::computeInitialGuessDensity()
         }
 
         this->F_beta                 = this->h;
+        this->F_beta_prev            = this->F_beta;
         Eigen::MatrixXd F_beta_prime = this->X.transpose() * this->F_beta * this->X;
         Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> beta_solver(F_beta_prime);
         this->C_beta               = this->X * beta_solver.eigenvectors();
@@ -209,12 +210,14 @@ void SCF::computeInitialGuessDensity()
     else
     {
         this->F_beta           = this->F_alpha;
+        this->F_beta_prev      = this->F_alpha_prev;
         this->C_beta           = this->C_alpha;
         this->eigenvalues_beta = this->eigenvalues_alpha;
         this->D_beta           = this->D_alpha;
     }
 
-    this->D_tot = this->D_alpha + this->D_beta;
+    this->D_tot_prev = Eigen::MatrixXd::Zero(this->basisCount, this->basisCount);
+    this->D_tot      = this->D_alpha + this->D_beta;
 
     // Calculate the initial electronic energy.
     this->electronicEnergy = 0.5 * (this->D_alpha * (this->h + this->F_alpha)).trace()
@@ -427,18 +430,18 @@ void SCF::buildFockMatrix()
             const size_t big_I_base = i * (i + 1) / 2;
             for (size_t j = 0; j < i; ++j)
             {
-                const size_t jN_ao      = j * N_ao;
-                const size_t ji_idx     = j + iN_ao;
-                const size_t big_I      = big_I_base + j;
-                const size_t index_base = big_I * (big_I + 1) / 2;
+                const size_t jN_ao        = j * N_ao;
+                const size_t ji_idx       = j + iN_ao;
+                const size_t big_I        = big_I_base + j;
+                const size_t index_base_I = big_I * (big_I + 1) / 2;
 
                 for (size_t k = 0; k <= i; ++k)
                 {
-                    const size_t kN_ao      = k * N_ao;
-                    const size_t ki_idx     = k + iN_ao;
-                    const size_t kj_idx     = k + jN_ao;
-                    const size_t big_K_base = k * (k + 1) / 2;
-                    size_t index            = index_base + big_K_base;
+                    const size_t kN_ao        = k * N_ao;
+                    const size_t ki_idx       = k + iN_ao;
+                    const size_t kj_idx       = k + jN_ao;
+                    const size_t big_K_base   = k * (k + 1) / 2;
+                    const size_t index_base_K = index_base_I + big_K_base;
 
                     const size_t l_max = (i == k) ? j : k;
                     for (size_t l = 0; l < l_max; ++l)
@@ -446,8 +449,8 @@ void SCF::buildFockMatrix()
                         if (i == k && j == l) // exclude (ij|ij)
                             continue;
 
-                        const double eri = this->Vee[index];
-                        index++;
+                        const size_t index = index_base_K + l;
+                        const double eri   = this->Vee[index];
 
                         if (std::abs(eri) < this->options.schwartzThreshold)
                             continue;
@@ -511,7 +514,7 @@ void SCF::buildFockMatrix()
     }
 }
 
-void SCF::buildFockMatrix(double schwartzThreshold, double densityThreshold)
+void SCF::buildFockMatrixDirect()
 {
     const size_t N_ao    = this->basisCount;
     const auto& basis    = this->molecule->getBasis();
@@ -524,38 +527,61 @@ void SCF::buildFockMatrix(double schwartzThreshold, double densityThreshold)
     if (this->options.unrestricted)
         K_beta = Eigen::MatrixXd::Zero(N_ao, N_ao);
 
+    const Eigen::MatrixXd deltaD_tot    = this->D_tot - this->D_tot_prev;
+    const double* const deltaDtot_ptr   = deltaD_tot.data();
+    const Eigen::MatrixXd deltaD_alpha  = this->D_alpha - this->D_alpha_prev;
+    const double* const deltaDalpha_ptr = deltaD_alpha.data();
+    const Eigen::MatrixXd deltaD_beta   = this->D_beta - this->D_beta_prev;
+    const double* const deltaDbeta_ptr  = this->options.unrestricted ? deltaD_beta.data() : nullptr;
+
     // Pre-calculate the maximum density elements for each shell pair for density screening.
-    Eigen::MatrixXd D_max = Eigen::MatrixXd::Zero(nShells, nShells);
+    Eigen::MatrixXd deltaDtotMax   = Eigen::MatrixXd::Zero(nShells, nShells);
+    Eigen::MatrixXd deltaDalphaMax = Eigen::MatrixXd::Zero(nShells, nShells);
+    Eigen::MatrixXd deltaDbetaMax  = Eigen::MatrixXd::Zero(nShells, nShells);
+
 #pragma omp parallel for collapse(2)
     for (size_t s1 = 0; s1 < nShells; ++s1)
     {
         for (size_t s2 = 0; s2 <= s1; ++s2)
         {
-            double maxVal = 0.0;
+            double maxValTot = 0.0, maxValAlpha = 0.0, maxValBeta = 0.0;
             for (size_t a = shells[s1].aoOffset; a < shells[s1].aoOffset + shells[s1].nao; ++a)
             {
                 for (size_t b = shells[s2].aoOffset; b < shells[s2].aoOffset + shells[s2].nao; ++b)
                 {
-                    maxVal = std::max(maxVal, std::abs(this->D_tot(a, b)));
+                    maxValTot   = std::max(maxValTot, std::abs(deltaD_tot(a, b)));
+                    maxValAlpha = std::max(maxValAlpha, std::abs(deltaD_alpha(a, b)));
+                    if (this->options.unrestricted)
+                        maxValBeta = std::max(maxValBeta, std::abs(deltaD_beta(a, b)));
                 }
             }
-            D_max(s1, s2) = maxVal;
-            D_max(s2, s1) = maxVal;
+            deltaDtotMax(s2, s1)   = maxValTot;
+            deltaDalphaMax(s2, s1) = maxValAlpha;
+            if (this->options.unrestricted)
+                deltaDbetaMax(s2, s1) = maxValBeta;
         }
     }
-
+    deltaDtotMax   = deltaDtotMax.selfadjointView<Eigen::Upper>();
+    deltaDalphaMax = deltaDalphaMax.selfadjointView<Eigen::Upper>();
+    if (this->options.unrestricted)
+        deltaDbetaMax = deltaDbetaMax.selfadjointView<Eigen::Upper>();
 
 #pragma omp parallel
     {
         // Thread-local matrices to void data races
         Eigen::MatrixXd J_p       = Eigen::MatrixXd::Zero(N_ao, N_ao);
+        double* const J_ptr       = J_p.data();
         Eigen::MatrixXd K_alpha_p = Eigen::MatrixXd::Zero(N_ao, N_ao);
+        double* const K_alpha_ptr = K_alpha_p.data();
         Eigen::MatrixXd K_beta_p;
+        double* K_beta_ptr = nullptr;
         if (this->options.unrestricted)
-            K_beta_p = Eigen::MatrixXd::Zero(N_ao, N_ao);
+        {
+            K_beta_p   = Eigen::MatrixXd::Zero(N_ao, N_ao);
+            K_beta_ptr = K_beta_p.data();
+        }
 
-
-#pragma omp for collapse(4) schedule(dynamic, 64)
+#pragma omp for collapse(4) schedule(dynamic, 32) nowait
         for (size_t a = 0; a < nShells; ++a)
         {
             for (size_t b = 0; b < nShells; ++b)
@@ -565,17 +591,27 @@ void SCF::buildFockMatrix(double schwartzThreshold, double densityThreshold)
                     for (size_t d = 0; d < nShells; ++d)
                     {
                         // Only calculate unique integrals
-                        if (b > a || d > c || ((a * (a + 1) / 2 + b) < (c * (c + 1) / 2 + d)))
+                        if (b > a || d > c || (a * (a + 1) / 2 + b) < (c * (c + 1) / 2 + d))
                             continue;
 
                         // Schwartz screening
-                        if (Q(a, b) * Q(c, d) < schwartzThreshold)
+                        if (Q(a, b) * Q(c, d) < this->options.schwartzThreshold)
                             continue;
 
                         // Density screening
-                        if (std::abs(D_max(c, d)) < densityThreshold && std::abs(D_max(a, b)) < densityThreshold
-                            && std::abs(D_max(a, c)) < densityThreshold && std::abs(D_max(a, d)) < densityThreshold
-                            && std::abs(D_max(b, c)) < densityThreshold && std::abs(D_max(b, d)) < densityThreshold)
+                        double maxDensity = std::max(
+                            {2 * deltaDtotMax(a, b),
+                             2 * deltaDtotMax(c, d),
+                             deltaDalphaMax(a, c),
+                             deltaDalphaMax(a, d),
+                             deltaDalphaMax(b, c),
+                             deltaDalphaMax(b, d)}
+                        );
+                        if (this->options.unrestricted)
+                            maxDensity = std::max(
+                                {maxDensity, deltaDbetaMax(a, c), deltaDbetaMax(a, d), deltaDbetaMax(b, c), deltaDbetaMax(b, d)}
+                            );
+                        if (maxDensity < this->options.densityThreshold)
                             continue;
 
                         const auto& sa = shells[a];
@@ -592,137 +628,74 @@ void SCF::buildFockMatrix(double schwartzThreshold, double densityThreshold)
 
                         for (size_t A = 0; A < sa.nao; ++A)
                         {
-                            size_t i = sa.aoOffset + A;
+                            const size_t i           = A + sa.aoOffset;
+                            const size_t iN_ao       = i * N_ao;
+                            const size_t index_baseA = A * naoBCD;
+
                             for (size_t B = 0; B < sb.nao; ++B)
                             {
-                                size_t j = sb.aoOffset + B;
+                                const size_t j = B + sb.aoOffset;
+                                if (j > i)
+                                    continue;
+
+                                const size_t jN_ao       = j * N_ao;
+                                const size_t ji_idx      = j + iN_ao;
+                                const size_t index_baseB = index_baseA + B * naoCD;
+
                                 for (size_t C = 0; C < sc.nao; ++C)
                                 {
-                                    size_t k = sc.aoOffset + C;
+                                    const size_t k           = C + sc.aoOffset;
+                                    const size_t kN_ao       = k * N_ao;
+                                    const size_t ki_idx      = k + iN_ao;
+                                    const size_t kj_idx      = k + jN_ao;
+                                    const size_t index_baseC = index_baseB + C * naoD;
+
+                                    const size_t l_max = i == k ? j : k;
                                     for (size_t D = 0; D < sd.nao; ++D)
                                     {
-                                        size_t l = sd.aoOffset + D;
+                                        const size_t l = D + sd.aoOffset;
+                                        if (l > l_max)
+                                            continue;
 
-                                        double eri = ERIs[A * naoBCD + B * naoCD + C * naoD + D];
+                                        const size_t index = index_baseC + D;
+                                        const double eri   = ERIs[index];
+                                        if (std::abs(eri) < this->options.schwartzThreshold)
+                                            continue;
 
-                                        if (i == j && j == k && k == l) // (ii|ii)
+                                        const size_t li_idx = l + iN_ao;
+                                        const size_t lj_idx = l + jN_ao;
+                                        const size_t lk_idx = l + kN_ao;
+
+                                        const unsigned symFactor_kl = k == l ? 1 : 2;
+                                        const unsigned symFactor_ij = i == j ? 1 : 2;
+
+                                        J_ptr[ji_idx] += symFactor_kl * deltaDtot_ptr[lk_idx] * eri;
+                                        J_ptr[lk_idx] += (l != j || k != i) * symFactor_ij * deltaDtot_ptr[ji_idx] * eri;
+
+                                        const unsigned symFactor_jk = j == k ? 2 : 1;
+                                        const unsigned symFactor_jl = j == l && i != k ? 2 : 1;
+                                        const unsigned symFactor_ik = i == k && j != l ? 2 : 1;
+
+                                        const size_t idx1 = i < k ? i + k * N_ao : ki_idx;
+                                        const size_t idx2 = j < l ? j + l * N_ao : lj_idx;
+                                        const size_t idx3 = j < k ? j + k * N_ao : kj_idx;
+
+                                        K_alpha_ptr[li_idx] += deltaDalpha_ptr[kj_idx] * eri;
+                                        K_alpha_ptr[idx1] += (idx1 != li_idx) * symFactor_ik * deltaDalpha_ptr[lj_idx] * eri;
+                                        K_alpha_ptr[idx2] += (idx2 != li_idx && idx2 != idx1) * symFactor_jl
+                                                           * deltaDalpha_ptr[ki_idx] * eri;
+                                        K_alpha_ptr[idx3] += (idx3 != li_idx && idx3 != idx1 && idx3 != idx2)
+                                                           * symFactor_jk * deltaDalpha_ptr[li_idx] * eri;
+
+                                        if (this->options.unrestricted)
                                         {
-                                            J_p(i, i) += D_tot(i, i) * eri;
-                                            K_alpha_p(i, i) += D_alpha(i, i) * eri;
-
-                                            if (this->options.unrestricted)
-                                            {
-                                                K_beta_p(i, i) += D_beta(i, i) * eri;
-                                            }
-                                        }
-                                        else if (i == j && j == k) // (ii|il)
-                                        {
-                                            J_p(i, i) += 2 * this->D_tot(i, l) * eri;
-                                            J_p(l, i) += this->D_tot(i, i) * eri;
-                                            J_p(i, l) += this->D_tot(i, i) * eri;
-                                            K_alpha_p(i, i) += 2 * this->D_alpha(i, l) * eri;
-                                            K_alpha_p(l, i) += this->D_alpha(i, i) * eri;
-                                            K_alpha_p(i, l) += this->D_alpha(i, i) * eri;
-
-                                            if (this->options.unrestricted)
-                                            {
-                                                K_beta_p(i, i) += 2 * this->D_beta(i, l) * eri;
-                                                K_beta_p(l, i) += this->D_beta(i, i) * eri;
-                                                K_beta_p(i, l) += this->D_beta(i, i) * eri;
-                                            }
-                                        }
-                                        else if (i == j && k == l) // (ii|kk)
-                                        {
-                                            J_p(i, i) += this->D_tot(k, k) * eri;
-                                            J_p(k, k) += this->D_tot(i, i) * eri;
-                                            K_alpha_p(i, k) += this->D_alpha(i, k) * eri;
-                                            K_alpha_p(k, i) += this->D_alpha(i, k) * eri;
-
-                                            if (this->options.unrestricted)
-                                            {
-                                                K_beta_p(i, k) += this->D_beta(i, k) * eri;
-                                                K_beta_p(k, i) += this->D_beta(i, k) * eri;
-                                            }
-                                        }
-                                        else if (i == k && j == l) // (ij|ij)
-                                        {
-                                            // (ij|ij) = (ji|ij) = (ij|ji) = (ji|ji)
-                                            J_p(i, j) += 2 * this->D_tot(i, j) * eri;
-                                            J_p(j, i) += 2 * this->D_tot(i, j) * eri;
-                                            K_alpha_p(i, j) += this->D_alpha(j, i) * eri;
-                                            K_alpha_p(j, i) += this->D_alpha(i, j) * eri;
-                                            K_alpha_p(i, i) += this->D_alpha(j, j) * eri;
-                                            K_alpha_p(j, j) += this->D_alpha(i, i) * eri;
-
-                                            if (this->options.unrestricted)
-                                            {
-                                                K_beta_p(i, j) += this->D_beta(j, i) * eri;
-                                                K_beta_p(j, i) += this->D_beta(i, j) * eri;
-                                                K_beta_p(i, i) += this->D_beta(j, j) * eri;
-                                                K_beta_p(j, j) += this->D_beta(i, i) * eri;
-                                            }
-                                        }
-                                        else if (i == j) // (ii|kl)
-                                        {
-                                            J_p(i, i) += 2 * this->D_tot(k, l) * eri;
-                                            J_p(k, l) += this->D_tot(i, i) * eri;
-                                            J_p(l, k) += this->D_tot(i, i) * eri;
-                                            K_alpha_p(i, l) += this->D_alpha(i, k) * eri;
-                                            K_alpha_p(i, k) += this->D_alpha(i, l) * eri;
-                                            K_alpha_p(k, i) += this->D_alpha(l, i) * eri;
-                                            K_alpha_p(l, i) += this->D_alpha(k, i) * eri;
-
-                                            if (this->options.unrestricted)
-                                            {
-                                                K_beta_p(i, l) += this->D_beta(i, k) * eri;
-                                                K_beta_p(i, k) += this->D_beta(i, l) * eri;
-                                                K_beta_p(k, i) += this->D_beta(l, i) * eri;
-                                                K_beta_p(l, i) += this->D_beta(k, i) * eri;
-                                            }
-                                        }
-                                        else if (k == l) // (ij|kk)
-                                        {
-                                            J_p(i, j) += this->D_tot(k, k) * eri;
-                                            J_p(j, i) += this->D_tot(k, k) * eri;
-                                            J_p(k, k) += 2 * this->D_tot(i, j) * eri;
-                                            K_alpha_p(i, k) += this->D_alpha(j, k) * eri;
-                                            K_alpha_p(j, k) += this->D_alpha(i, k) * eri;
-                                            K_alpha_p(k, j) += this->D_alpha(k, i) * eri;
-                                            K_alpha_p(k, i) += this->D_alpha(k, j) * eri;
-                                            if (this->options.unrestricted)
-                                            {
-                                                K_beta_p(i, k) += this->D_beta(j, k) * eri;
-                                                K_beta_p(j, k) += this->D_beta(i, k) * eri;
-                                                K_beta_p(k, j) += this->D_beta(k, i) * eri;
-                                                K_beta_p(k, i) += this->D_beta(k, j) * eri;
-                                            }
-                                        }
-                                        else // (ij|kl)
-                                        {
-                                            J_p(i, j) += 2 * this->D_tot(k, l) * eri;
-                                            J_p(j, i) += 2 * this->D_tot(k, l) * eri;
-                                            J_p(k, l) += 2 * this->D_tot(i, j) * eri;
-                                            J_p(l, k) += 2 * this->D_tot(i, j) * eri;
-                                            K_alpha_p(i, l) += this->D_alpha(j, k) * eri;
-                                            K_alpha_p(j, l) += this->D_alpha(i, k) * eri;
-                                            K_alpha_p(i, k) += this->D_alpha(j, l) * eri;
-                                            K_alpha_p(j, k) += this->D_alpha(i, l) * eri;
-                                            K_alpha_p(k, j) += this->D_alpha(l, i) * eri;
-                                            K_alpha_p(l, j) += this->D_alpha(k, i) * eri;
-                                            K_alpha_p(k, i) += this->D_alpha(l, j) * eri;
-                                            K_alpha_p(l, i) += this->D_alpha(k, j) * eri;
-
-                                            if (this->options.unrestricted)
-                                            {
-                                                K_beta_p(i, l) += this->D_beta(j, k) * eri;
-                                                K_beta_p(j, l) += this->D_beta(i, k) * eri;
-                                                K_beta_p(i, k) += this->D_beta(j, l) * eri;
-                                                K_beta_p(j, k) += this->D_beta(i, l) * eri;
-                                                K_beta_p(k, j) += this->D_beta(l, i) * eri;
-                                                K_beta_p(l, j) += this->D_beta(k, i) * eri;
-                                                K_beta_p(k, i) += this->D_beta(l, j) * eri;
-                                                K_beta_p(l, i) += this->D_beta(k, j) * eri;
-                                            }
+                                            K_beta_ptr[li_idx] += deltaDbeta_ptr[kj_idx] * eri;
+                                            K_beta_ptr[idx1] += (idx1 != li_idx) * symFactor_ik * deltaDbeta_ptr[lj_idx]
+                                                              * eri;
+                                            K_beta_ptr[idx2] += (idx2 != li_idx && idx2 != idx1) * symFactor_jl
+                                                              * deltaDbeta_ptr[ki_idx] * eri;
+                                            K_beta_ptr[idx3] += (idx3 != li_idx && idx3 != idx1 && idx3 != idx2)
+                                                              * symFactor_jk * deltaDbeta_ptr[li_idx] * eri;
                                         }
                                     }
                                 }
@@ -743,11 +716,25 @@ void SCF::buildFockMatrix(double schwartzThreshold, double densityThreshold)
         }
     }
 
-    this->F_alpha = this->h + J - K_alpha;
+    J       = J.selfadjointView<Eigen::Upper>();
+    K_alpha = K_alpha.selfadjointView<Eigen::Upper>();
+
+    // F_m = F_{m-1} + I(D_m - D_{m-1})
+    this->F_alpha = this->F_alpha_prev + J - K_alpha;
+    // this->F_alpha      = this->h + J - K_alpha;
+    this->F_alpha_prev = this->F_alpha;
     if (this->options.unrestricted)
-        this->F_beta = this->h + J - K_beta;
+    {
+        K_beta       = K_beta.selfadjointView<Eigen::Upper>();
+        this->F_beta = this->F_beta_prev + J - K_beta;
+        // this->F_beta      = this->h + J - K_beta;
+        this->F_beta_prev = this->F_beta;
+    }
     else
-        this->F_beta = this->F_alpha;
+    {
+        this->F_beta      = this->F_alpha;
+        this->F_beta_prev = this->F_alpha_prev;
+    }
 }
 
 
@@ -801,9 +788,11 @@ void SCF::diagonalizeAndUpdate()
     Eigen::MatrixXd C_alpha_occ = this->C_alpha.leftCols(this->occupiedCountAlpha);
 
     // Form the new density matrix with damping (the damping coefficient can be zero).
+    this->D_alpha_prev = this->D_alpha;
     this->D_alpha = (1 - this->dampCoeff) * C_alpha_occ * C_alpha_occ.transpose() + this->dampCoeff * this->D_alpha;
 
     // Deal with beta spin if unrestricted.
+    this->D_beta_prev = this->D_beta;
     if (this->options.unrestricted)
     {
         Eigen::MatrixXd F_beta_prime = this->X.transpose() * this->F_beta * this->X;
@@ -826,14 +815,13 @@ void SCF::diagonalizeAndUpdate()
     }
     else
     {
-        this->F_beta           = this->F_alpha;
         this->C_beta           = this->C_alpha;
         this->eigenvalues_beta = this->eigenvalues_alpha;
         this->D_beta           = this->D_alpha;
     }
 
-    this->D_tot = this->D_alpha + this->D_beta;
-
+    this->D_tot_prev = this->D_tot;
+    this->D_tot      = this->D_alpha + this->D_beta;
 
     // Calculate the new electronic energy.
     this->electronicEnergy = 0.5 * (this->D_alpha * (this->h + this->F_alpha)).trace()

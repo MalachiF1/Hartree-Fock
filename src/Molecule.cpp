@@ -329,9 +329,12 @@ ElectronRepulsionTensor Molecule::electronRepulsionTensor(double threshold) cons
                 }
             }
 
-            Q(i, j) = Q(j, i) = maxVal;
+            Q(j, i) = maxVal;
         }
     }
+
+    Q = Q.selfadjointView<Eigen::Upper>();
+    Q = Q.cwiseSqrt();
 
 #pragma omp parallel for collapse(4) schedule(dynamic, 64)
     for (size_t i = 0; i < sc; ++i)
@@ -351,7 +354,7 @@ ElectronRepulsionTensor Molecule::electronRepulsionTensor(double threshold) cons
                         continue;
 
                     // apply Schwartz screening at the shell level
-                    if (Q(i, j) * Q(k, l) < threshold * threshold)
+                    if (Q(i, j) * Q(k, l) < threshold)
                         continue;
 
                     IntegralEngine::electronRepulsion(basis, shells[i], shells[j], shells[k], shells[l], Vee);
@@ -390,8 +393,12 @@ Eigen::MatrixXd Molecule::schwartzScreeningMatrix() const
                 }
             }
 
-            Q(i, j) = Q(j, i) = std::sqrt(maxVal);
+            Q(j, i) = maxVal;
         }
     }
+
+    Q = Q.selfadjointView<Eigen::Upper>();
+    Q = Q.cwiseSqrt();
+
     return Q;
 }
