@@ -64,10 +64,6 @@ class IntegralEngine
         double alpha1, double xa, double ya, double za, double alpha2, double xb, double yb, double zb
     );
 
-    // /**
-    //  * @brief Computes the Boys function F_m(T).
-    //  */
-    // static void calculateBoys(unsigned m_max, double T, std::span<double> F);
 
     struct EBuffer
     {
@@ -122,7 +118,7 @@ class IntegralEngine
             max_t(max_t),
             max_u(max_u),
             max_v(max_v),
-            max_n(max_t + max_u + max_v),
+            max_n((max_t + max_u + max_v) / 2),
             stride_u(max_t + 1),
             stride_v((max_t + 1) * (max_u + 1)),
             stride_n((max_t + 1) * (max_u + 1) * (max_v + 1))
@@ -148,7 +144,5 @@ class IntegralEngine
         }
     };
 
-    static void computeAuxiliaryIntegrals(
-        unsigned t_max, unsigned u_max, unsigned v_max, double p, const Vec3& PC, std::span<double> F, RBuffer& R_buffer
-    );
+    static void computeAuxiliaryIntegrals(double p, const Vec3& PC, std::span<double> F, RBuffer& R_buffer);
 };

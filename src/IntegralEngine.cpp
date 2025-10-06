@@ -207,7 +207,7 @@ void IntegralEngine::nuclearAttraction(
                 const double T           = primPair.p * PC.squaredNorm();
 
                 Boys::calculateBoys(R_buffer.max_n, T, F);
-                computeAuxiliaryIntegrals(max_L_total, max_L_total, max_L_total, primPair.p, PC, F, R_buffer);
+                computeAuxiliaryIntegrals(primPair.p, PC, F, R_buffer);
 
                 for (size_t a = 0; a < naoA; ++a)
                 {
@@ -296,15 +296,10 @@ void IntegralEngine::electronRepulsion(
             );
             const size_t idx = (pC * nprimD) + pD;
 
-            computeHermiteCoeffs(
-                shellC.l, shellD.l, primPairs_cd[idx].p, primPairs_cd[idx].PAx, primPairs_cd[idx].PBx, Ex_cd_vec[idx]
-            );
-            computeHermiteCoeffs(
-                shellC.l, shellD.l, primPairs_cd[idx].p, primPairs_cd[idx].PAy, primPairs_cd[idx].PBy, Ey_cd_vec[idx]
-            );
-            computeHermiteCoeffs(
-                shellC.l, shellD.l, primPairs_cd[idx].p, primPairs_cd[idx].PAz, primPairs_cd[idx].PBz, Ez_cd_vec[idx]
-            );
+            const auto& primPair_cd = primPairs_cd[idx];
+            computeHermiteCoeffs(shellC.l, shellD.l, primPair_cd.p, primPair_cd.PAx, primPair_cd.PBx, Ex_cd_vec[idx]);
+            computeHermiteCoeffs(shellC.l, shellD.l, primPair_cd.p, primPair_cd.PAy, primPair_cd.PBy, Ey_cd_vec[idx]);
+            computeHermiteCoeffs(shellC.l, shellD.l, primPair_cd.p, primPair_cd.PAz, primPair_cd.PBz, Ez_cd_vec[idx]);
         }
     }
 
@@ -379,7 +374,7 @@ void IntegralEngine::electronRepulsion(
                 const double T     = delta * (P_ab - P_cd).squaredNorm();
 
                 Boys::calculateBoys(R_buffer.max_n, T, F);
-                computeAuxiliaryIntegrals(max_L_total, max_L_total, max_L_total, delta, P_ab - P_cd, F, R_buffer);
+                computeAuxiliaryIntegrals(delta, P_ab - P_cd, F, R_buffer);
 
                 const unsigned naoCD  = naoC * naoD;
                 const unsigned naoBCD = naoB * naoCD;
@@ -582,15 +577,10 @@ void IntegralEngine::electronRepulsion(
             );
             const size_t idx = (pC * nprimD) + pD;
 
-            computeHermiteCoeffs(
-                shellC.l, shellD.l, primPairs_cd[idx].p, primPairs_cd[idx].PAx, primPairs_cd[idx].PBx, Ex_cd_vec[idx]
-            );
-            computeHermiteCoeffs(
-                shellC.l, shellD.l, primPairs_cd[idx].p, primPairs_cd[idx].PAy, primPairs_cd[idx].PBy, Ey_cd_vec[idx]
-            );
-            computeHermiteCoeffs(
-                shellC.l, shellD.l, primPairs_cd[idx].p, primPairs_cd[idx].PAz, primPairs_cd[idx].PBz, Ez_cd_vec[idx]
-            );
+            const auto& primPair_cd = primPairs_cd[idx];
+            computeHermiteCoeffs(shellC.l, shellD.l, primPair_cd.p, primPair_cd.PAx, primPair_cd.PBx, Ex_cd_vec[idx]);
+            computeHermiteCoeffs(shellC.l, shellD.l, primPair_cd.p, primPair_cd.PAy, primPair_cd.PBy, Ey_cd_vec[idx]);
+            computeHermiteCoeffs(shellC.l, shellD.l, primPair_cd.p, primPair_cd.PAz, primPair_cd.PBz, Ez_cd_vec[idx]);
         }
     }
 
@@ -665,7 +655,7 @@ void IntegralEngine::electronRepulsion(
                 const double T     = delta * (P_ab - P_cd).squaredNorm();
 
                 Boys::calculateBoys(R_buffer.max_n, T, F);
-                computeAuxiliaryIntegrals(max_L_total, max_L_total, max_L_total, delta, P_ab - P_cd, F, R_buffer);
+                computeAuxiliaryIntegrals(delta, P_ab - P_cd, F, R_buffer);
 
                 const unsigned naoCD  = naoC * naoD;
                 const unsigned naoBCD = naoB * naoCD;
@@ -898,17 +888,15 @@ void IntegralEngine::computeHermiteCoeffs(unsigned l1, unsigned l2, double p, do
     }
 }
 
-void IntegralEngine::computeAuxiliaryIntegrals(
-    unsigned t_max, unsigned u_max, unsigned v_max, double p, const Vec3& PC, std::span<double> F, RBuffer& R_buffer
-)
+void IntegralEngine::computeAuxiliaryIntegrals(double p, const Vec3& PC, std::span<double> F, RBuffer& R_buffer)
 {
     // This function implements the recurrence relations for R integrals:
     // R_{t,u,v}^{n} = t-1 * R_{t-2,u,v}^{n+1} + (PC)_x * R_{t-1,u,v}^{n+1} (if t>0)
     // R_{t,u,v}^{n} = u-1 * R_{t,u-2,v}^{n+1} + (PC)_y * R_{t,u-1,v}^{n+1} (if u>0)
     // R_{t,u,v}^{n} = v-1 * R_{t,u,v-2}^{n+1} + (PC)_z * R_{t,u,v-1}^{n+1} (if v>0)
     // Base case: R_{0,0,0}^{n} = (-2p)^n * F[n]
-    //
-    const unsigned n_max = t_max + u_max + v_max;
+
+    const unsigned t_max = R_buffer.max_t, u_max = R_buffer.max_u, v_max = R_buffer.max_v, n_max = R_buffer.max_n;
 
     const double neg_2p      = -2.0 * p;
     double neg_2p_pow_n      = 1.0;
