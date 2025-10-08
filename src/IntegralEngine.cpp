@@ -170,8 +170,8 @@ void IntegralEngine::nuclearAttraction(
     const unsigned max_L_total = shellA.l + shellB.l;
 
     // Allocate scratch space
-    RBuffer R_buffer(max_L_total, max_L_total, max_L_total);
-    std::vector<double> F(R_buffer.max_n + 1);
+    RBuffer R_buffer(max_L_total);
+    std::vector<double> F(R_buffer.max_l + 1);
     EBuffer Ex(shellA.l, shellB.l);
     EBuffer Ey(shellA.l, shellB.l);
     EBuffer Ez(shellA.l, shellB.l);
@@ -206,7 +206,7 @@ void IntegralEngine::nuclearAttraction(
                 const Eigen::Vector3d PC = Vec3(primPair.Px, primPair.Py, primPair.Pz) - C;
                 const double T           = primPair.p * PC.squaredNorm();
 
-                Boys::calculateBoys(R_buffer.max_n, T, F);
+                Boys::calculateBoys(R_buffer.max_l, T, F);
                 computeAuxiliaryIntegrals(primPair.p, PC, F, R_buffer);
 
                 for (size_t a = 0; a < naoA; ++a)
@@ -306,8 +306,8 @@ void IntegralEngine::electronRepulsion(
     // Allocate scratch space for (ab) pair and other intermediates
     EBuffer Ex_ab(shellA.l, shellB.l), Ey_ab(shellA.l, shellB.l), Ez_ab(shellA.l, shellB.l);
     const unsigned max_L_total = shellA.l + shellB.l + shellC.l + shellD.l;
-    RBuffer R_buffer(max_L_total, max_L_total, max_L_total);
-    std::vector<double> F(R_buffer.max_n + 1);
+    RBuffer R_buffer(max_L_total);
+    std::vector<double> F(R_buffer.max_l + 1);
 
     const double* alphaA = &exps[shellA.primOffset];
     const double* alphaB = &exps[shellB.primOffset];
@@ -373,7 +373,7 @@ void IntegralEngine::electronRepulsion(
                 const auto P_cd    = Vec3(primPair_cd.Px, primPair_cd.Py, primPair_cd.Pz);
                 const double T     = delta * (P_ab - P_cd).squaredNorm();
 
-                Boys::calculateBoys(R_buffer.max_n, T, F);
+                Boys::calculateBoys(R_buffer.max_l, T, F);
                 computeAuxiliaryIntegrals(delta, P_ab - P_cd, F, R_buffer);
 
                 const unsigned naoCD  = naoC * naoD;
@@ -587,8 +587,8 @@ void IntegralEngine::electronRepulsion(
     // Allocate scratch space for (ab) pair and other intermediates
     EBuffer Ex_ab(shellA.l, shellB.l), Ey_ab(shellA.l, shellB.l), Ez_ab(shellA.l, shellB.l);
     const unsigned max_L_total = shellA.l + shellB.l + shellC.l + shellD.l;
-    RBuffer R_buffer(max_L_total, max_L_total, max_L_total);
-    std::vector<double> F(R_buffer.max_n + 1);
+    RBuffer R_buffer(max_L_total);
+    std::vector<double> F(R_buffer.max_l + 1);
 
     const double* alphaA = &exps[shellA.primOffset];
     const double* alphaB = &exps[shellB.primOffset];
@@ -654,7 +654,7 @@ void IntegralEngine::electronRepulsion(
                 const auto P_cd    = Vec3(primPair_cd.Px, primPair_cd.Py, primPair_cd.Pz);
                 const double T     = delta * (P_ab - P_cd).squaredNorm();
 
-                Boys::calculateBoys(R_buffer.max_n, T, F);
+                Boys::calculateBoys(R_buffer.max_l, T, F);
                 computeAuxiliaryIntegrals(delta, P_ab - P_cd, F, R_buffer);
 
                 const unsigned naoCD  = naoC * naoD;
@@ -881,7 +881,6 @@ void IntegralEngine::computeHermiteCoeffs(unsigned l1, unsigned l2, double p, do
                 if (t + 1 <= i + j - 1)
                     val += (t + 1) * E_jm1_ptr[t + 1];
 
-                // E_buffer(i, j, t) = val;
                 E_ij_ptr[t] = val;
             }
         }
@@ -896,26 +895,26 @@ void IntegralEngine::computeAuxiliaryIntegrals(double p, const Vec3& PC, std::sp
     // R_{t,u,v}^{n} = v-1 * R_{t,u,v-2}^{n+1} + (PC)_z * R_{t,u,v-1}^{n+1} (if v>0)
     // Base case: R_{0,0,0}^{n} = (-2p)^n * F[n]
 
-    const unsigned t_max = R_buffer.max_t, u_max = R_buffer.max_u, v_max = R_buffer.max_v, n_max = R_buffer.max_n;
+    const unsigned max_l = R_buffer.max_l;
 
     const double neg_2p      = -2.0 * p;
     double neg_2p_pow_n      = 1.0;
     double* const R_000n_ptr = &R_buffer(0, 0, 0, 0);
     size_t index             = 0;
-    for (unsigned n = 0; n <= n_max; ++n)
+    for (unsigned n = 0; n <= max_l; ++n)
     {
         R_000n_ptr[index] = neg_2p_pow_n * F[n];
         index += R_buffer.stride_n;
         neg_2p_pow_n *= neg_2p;
     }
 
-    unsigned n = n_max;
+    unsigned n = max_l;
     while (n-- > 0)
     {
         // Build up t dimension from t=1 up to max_t
         const double* const R_np1_t_ptr = &R_buffer(0, 0, 0, n + 1);
         double* const R_n_t_ptr         = &R_buffer(0, 0, 0, n);
-        for (unsigned t = 1; t <= t_max; ++t)
+        for (unsigned t = 1; t <= max_l - n; ++t)
         {
             const double val = PC.x() * R_np1_t_ptr[t - 1];
             if (t >= 2)
@@ -925,43 +924,45 @@ void IntegralEngine::computeAuxiliaryIntegrals(double p, const Vec3& PC, std::sp
         }
 
         // Build up u dimension
-        for (unsigned u = 1; u <= u_max; ++u)
+        for (unsigned u = 1; u <= max_l - n; ++u)
         {
             double* const R_n_ptr             = &R_buffer(0, u, 0, n);
             const double* const R_np1_um1_ptr = &R_buffer(0, u - 1, 0, n + 1);
+
             if (u >= 2)
             {
                 const double* R_np1_um2_ptr = &R_buffer(0, u - 2, 0, n + 1);
-                for (unsigned t = 0; t <= t_max; ++t)
+                for (unsigned t = 0; t <= max_l - n - u; ++t)
                 {
                     R_n_ptr[t] = PC.y() * R_np1_um1_ptr[t] + (u - 1) * R_np1_um2_ptr[t];
                 }
             }
             else
             { // u is exactly 1
-                for (unsigned t = 0; t <= t_max; ++t) { R_n_ptr[t] = PC.y() * R_np1_um1_ptr[t]; }
+                for (unsigned t = 0; t <= max_l - n - 1; ++t) { R_n_ptr[t] = PC.y() * R_np1_um1_ptr[t]; }
             }
         }
 
         // Build up v dimension
-        for (unsigned v = 1; v <= v_max; ++v)
+        for (unsigned v = 1; v <= max_l - n; ++v)
         {
-            for (unsigned u = 0; u <= u_max; ++u)
+            for (unsigned u = 0; u <= max_l - n - v; ++u)
             {
                 // Get pointers to the start of the relevant rows for efficiency
                 double* const R_n_ptr             = &R_buffer(0, u, v, n);
                 const double* const R_np1_vm1_ptr = &R_buffer(0, u, v - 1, n + 1);
+
                 if (v >= 2)
                 {
                     const double* const R_np1_vm2_ptr = &R_buffer(0, u, v - 2, n + 1);
-                    for (unsigned t = 0; t <= t_max; ++t)
+                    for (unsigned t = 0; t <= max_l - n - u - v; ++t)
                     {
                         R_n_ptr[t] = PC.z() * R_np1_vm1_ptr[t] + (v - 1) * R_np1_vm2_ptr[t];
                     }
                 }
                 else
                 { // v is exactly 1
-                    for (unsigned t = 0; t <= t_max; ++t) { R_n_ptr[t] = PC.z() * R_np1_vm1_ptr[t]; }
+                    for (unsigned t = 0; t <= max_l - n - u - 1; ++t) { R_n_ptr[t] = PC.z() * R_np1_vm1_ptr[t]; }
                 }
             }
         }

@@ -107,30 +107,25 @@ class IntegralEngine
 
     struct RBuffer
     {
-        size_t max_t, max_u, max_v;
-        size_t max_n;
+        size_t max_l;
         size_t stride_u, stride_v, stride_n;
 
         std::vector<double> data;
+        std::vector<bool> needed;
 
         RBuffer() = default;
-        RBuffer(size_t max_t, size_t max_u, size_t max_v) :
-            max_t(max_t),
-            max_u(max_u),
-            max_v(max_v),
-            max_n((max_t + max_u + max_v) / 2),
-            stride_u(max_t + 1),
-            stride_v((max_t + 1) * (max_u + 1)),
-            stride_n((max_t + 1) * (max_u + 1) * (max_v + 1))
+        RBuffer(size_t max_l) :
+            max_l(max_l),
+            stride_u(max_l + 1),
+            stride_v((max_l + 1) * (max_l + 1)),
+            stride_n((max_l + 1) * (max_l + 1) * (max_l + 1)),
+            needed(stride_n * (max_l + 1), true)
         {
-            data.resize(stride_n * (max_n + 1));
+            data.resize(stride_n * (max_l + 1));
         }
 
         double& operator()(size_t t, size_t u, size_t v, size_t n) noexcept
         {
-            // const size_t index = n + (v * max_n) + (u * max_n * (max_v + 1)) + (t * (max_u + 1) * (max_v + 1) *
-            // max_n); const size_t index = t + u * (max_t + 1) + v * (max_t + 1) * (max_u + 1)
-            //                    + n * (max_t + 1) * (max_u + 1) * (max_v + 1);
             const size_t index = t + u * stride_u + v * stride_v + n * stride_n;
             assert(index < data.size());
             return data[index];
