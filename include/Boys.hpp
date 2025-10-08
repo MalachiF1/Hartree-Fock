@@ -37,14 +37,18 @@ class GridManager
     }
 
     const std::vector<double>& getGrid() const { return grid; }
-    double getValue(size_t i, size_t j) const { return grid[(i * numGridPoints) + j]; }
+    const double& getValue(size_t i, size_t j) const
+    {
+        constexpr size_t gridMaxOrder = MAX_L + 2;
+        return grid[j * gridMaxOrder + i];
+    }
 
     GridManager(const GridManager&)    = delete;
     void operator=(const GridManager&) = delete;
 
   private:
     std::vector<double> grid;
-    const size_t numGridPoints = static_cast<size_t>(GRID_MAX / GRID_STEP_DELTA) + 1;
+    static constexpr size_t numGridPoints = static_cast<size_t>(GRID_MAX / GRID_STEP_DELTA) + 1;
 
     GridManager();
 };

@@ -8,71 +8,71 @@
 
 /**
  * This implementation is based on:
- * Weiss, A. K., & Ochsenfeld, C. (2015). A rigorous and optimized strategy for the evaluation of the B oys function
+ * Weiss, A. K., & Ochsenfeld, C. (2015). A rigorous and optimized strategy for the evaluation of the Boys function
  * kernel in molecular electronic structure theory. Journal of Computational Chemistry, 36(18), 1390-1398.
  */
 void Boys::calculateBoys(unsigned m_max, double T, std::span<double> F)
 {
+    // For large T, use the asymptotic expansion.
     if (T > 30.0)
     {
-        // For large T, use the asymptotic expansion.
-        F[0] = SQRT_PI_BY_2 / std::sqrt(T);
-        for (unsigned m = 0; m < m_max; ++m) { F[m + 1] = (m + 0.5) * F[m] / T; }
+        F[0]              = SQRT_PI_BY_2 / std::sqrt(T);
+        const double invT = 1.0 / T;
+        for (unsigned m = 0; m < m_max; ++m) { F[m + 1] = (m + 0.5) * F[m] * invT; }
         return;
     }
 
-    const auto& gridManager    = GridManager::getInstance();
-    bool useDownwardRecursion  = (T <= TRANSITION_VALUES[m_max]);
-    auto gridIndex             = static_cast<size_t>(T / GRID_STEP_DELTA);
-    double T_grid              = gridIndex * GRID_STEP_DELTA;
-    double T_diff              = T - T_grid;
-    double half_T_diff_squared = 0.5 * T_diff * T_diff;
+    // Initialize grid
+    const auto& gridManager          = GridManager::getInstance();
+    const auto gridIndex             = static_cast<size_t>(T / GRID_STEP_DELTA);
+    const double T_grid              = gridIndex * GRID_STEP_DELTA;
+    const double T_diff              = T - T_grid;
+    const double half_T_diff_squared = 0.5 * T_diff * T_diff;
 
-    if (m_max == 0 || m_max == 1)
+
+    // m_max is 0 or 1, handled directly.
+    if (m_max < 2)
     {
-        F[0] = gridManager.getValue(0, gridIndex) - (T_diff * gridManager.getValue(1, gridIndex))
-             + (half_T_diff_squared * gridManager.getValue(2, gridIndex));
+        // Pointer for m = 0, index = gridIndex, the following are m = 1, 2, 3... for the same gridIndex, until m = MAX_L
+        // + 2. i.e gridManager.getValue(1, gridIndex) is equivalent to grid_ptr[1]
+        const double* const grid_ptr = &gridManager.getValue(0, gridIndex);
+
+        F[0] = grid_ptr[0] - T_diff * grid_ptr[1] + half_T_diff_squared * grid_ptr[2];
 
         if (m_max == 0)
             return;
 
-        F[1] = gridManager.getValue(1, gridIndex) - (T_diff * gridManager.getValue(2, gridIndex))
-             + (half_T_diff_squared * gridManager.getValue(3, gridIndex));
+        F[1] = grid_ptr[1] - T_diff * grid_ptr[2] + half_T_diff_squared * grid_ptr[3];
+
         return;
     }
 
-    unsigned startOrder = useDownwardRecursion ? m_max : 0;
-    double F_start      = gridManager.getValue(startOrder, gridIndex)
-                   - (T_diff * gridManager.getValue(startOrder + 1, gridIndex))
-                   + (half_T_diff_squared * gridManager.getValue(startOrder + 2, gridIndex));
-    F[startOrder] = F_start;
+    const double expMinusT = std::exp(-T);
 
-    // double expMinusT;
-    // if (T > EXP_CUTOFF)
-    //     expMinusT = schraudolphExp(-T);
-    // else
-    // expMinusT = std::exp(-T);
-
-    double expMinusT = std::exp(-T);
-
-    if (useDownwardRecursion)
+    // Decide whether to use upward or downward recursion based on the value of T.
+    if (T <= TRANSITION_VALUES[m_max])
     {
-        for (unsigned m = m_max; m >= 1; --m) { F[m - 1] = (2 * T * F[m] + expMinusT) / (2 * (m - 1) + 1); }
+        // Downward recursion
+        const double* const grid_ptr = &gridManager.getValue(m_max, gridIndex);
+        F[m_max]                     = grid_ptr[0] - T_diff * grid_ptr[1] + half_T_diff_squared * grid_ptr[2];
+
+        const double twoT = 2.0 * T;
+        for (unsigned m = m_max; m >= 1; --m) { F[m - 1] = (twoT * F[m] + expMinusT) / (2 * (m - 1) + 1); }
     }
     else
     {
-        for (unsigned m = 0; m < m_max; ++m) { F[m + 1] = ((2.0 * m + 1.0) * F[m] - expMinusT) / (2.0 * T); }
+        // Upward recursion
+        const double* const grid_ptr = &gridManager.getValue(0, gridIndex);
+        F[0]                         = grid_ptr[0] - T_diff * grid_ptr[1] + half_T_diff_squared * grid_ptr[2];
+
+        const double inv_twoT = 1 / (2 * T);
+        for (unsigned m = 0; m < m_max; ++m) { F[m + 1] = ((2.0 * m + 1.0) * F[m] - expMinusT) * inv_twoT; }
     }
 }
 
 
 double Boys::analyticalBoys(unsigned m, double T)
 {
-    if (T < 1e-9)
-    {
-        return 1.0 / (2.0 * m + 1.0);
-    }
-
     double sum  = 0.0;
     double term = 1.0 / (m + 0.5); // Initial term for the iterative series.
     sum += term;
@@ -91,23 +91,18 @@ double Boys::analyticalBoys(unsigned m, double T)
 
 GridManager::GridManager()
 {
-    const size_t gridMaxOrder = MAX_L + 2;
-
-    const size_t totalSize = static_cast<size_t>(gridMaxOrder + 1) * numGridPoints;
+    constexpr size_t gridMaxOrder = MAX_L + 2;
+    constexpr size_t totalSize    = static_cast<size_t>(gridMaxOrder + 1) * numGridPoints;
     grid.resize(totalSize);
 
     std::ifstream in("boys_grid.data", std::ios_base::binary);
     if (!in.read((char*)grid.data(), totalSize * sizeof(double)))
     {
-        for (size_t i = 0; i <= gridMaxOrder; ++i)
+        for (size_t i = 0; i <= numGridPoints; ++i)
         {
-            for (size_t j = 0; j < numGridPoints; ++j)
-            {
-                double T_j                  = j * GRID_STEP_DELTA;
-                grid[i * numGridPoints + j] = Boys::analyticalBoys(i, T_j);
-            }
+            double T_i = i * GRID_STEP_DELTA;
+            for (size_t j = 0; j < gridMaxOrder; ++j) { grid[i * gridMaxOrder + j] = Boys::analyticalBoys(j, T_i); }
         }
-
         std::ofstream out("boys_grid.data", std::ios_base::binary);
         out.write((char*)grid.data(), totalSize * sizeof(double));
     }
