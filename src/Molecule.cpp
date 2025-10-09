@@ -84,9 +84,9 @@ std::vector<std::string> Molecule::getAOLabels() const
 
     for (const auto& shell : shells)
     {
-        const double x = cx[shell.primOffset];
-        const double y = cy[shell.primOffset];
-        const double z = cz[shell.primOffset];
+        const double x = cx[shell.shellIndex];
+        const double y = cy[shell.shellIndex];
+        const double z = cz[shell.shellIndex];
         auto atom      = std::ranges::find_if(
             geometry,
             [&x, &y, &z](const Atom& a) { return std::abs((a.coords - Eigen::Vector3d(x, y, z)).squaredNorm()) < 1e-12; }

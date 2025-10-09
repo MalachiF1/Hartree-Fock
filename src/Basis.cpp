@@ -20,29 +20,47 @@ std::string Shell::toString() const
 
 Basis::Basis(const std::string& name, const std::vector<Atom>& geometry) : name(name)
 {
-    std::vector<int> elements;
-    for (const auto& atom : geometry)
-    {
-        // Ensure that no duplicate atomic numbers are added to the elements vector.
-        if (std::ranges::find(elements, atom.atomicNumber) == elements.end())
-            elements.push_back(atom.atomicNumber);
-    }
+    std::map<int, int> elementCount;
+    for (const auto& atom : geometry) { elementCount[atom.atomicNumber]++; }
 
+    std::vector<int> elements;
+    for (const auto& [element, count] : elementCount) { elements.push_back(element); }
     std::map<int, std::vector<RawShell>> basisData = readBasis(name, elements);
 
-    size_t size = geometry.size() * 10;
-    this->exps.reserve(size);
-    this->coefficients.reserve(size);
-    this->cx.reserve(size);
-    this->cy.reserve(size);
-    this->cz.reserve(size);
-    this->lx.reserve(size);
-    this->ly.reserve(size);
-    this->lz.reserve(size);
+    // Reserve space
+    size_t nShells = 0;
+    size_t nPrims  = 0;
+    size_t nAOs    = 0;
+    size_t nCoeffs = 0;
 
+    for (const auto& [element, count] : elementCount)
+    {
+        const auto& shells = basisData.at(element);
+
+        nShells += shells.size() * count;
+        for (const auto& shell : shells)
+        {
+            nPrims += shell.exponents.size() * count;
+            const size_t aosInShell = (shell.angularMomentum + 1) * (shell.angularMomentum + 2) / 2;
+            nAOs += aosInShell * count;
+            nCoeffs += shell.exponents.size() * aosInShell * count;
+        }
+    }
+
+    this->exps.reserve(nPrims);
+    this->coefficients.reserve(nCoeffs);
+    this->cx.reserve(nShells);
+    this->cy.reserve(nShells);
+    this->cz.reserve(nShells);
+    this->lx.reserve(nAOs);
+    this->ly.reserve(nAOs);
+    this->lz.reserve(nAOs);
+
+    // Fill in the data
     size_t primOffset  = 0;
     size_t aoOffset    = 0;
     size_t coeffOffset = 0;
+    size_t shellIndex  = 0;
     for (const auto& atom : geometry)
     {
         const auto& shellsForAtom = basisData.at(atom.atomicNumber);
@@ -53,21 +71,21 @@ Basis::Basis(const std::string& name, const std::vector<Atom>& geometry) : name(
                 rawShell.angularMomentum,
                 (rawShell.angularMomentum + 1) * (rawShell.angularMomentum + 2) / 2,
                 rawShell.exponents.size(),
+                shellIndex,
                 primOffset,
                 aoOffset,
                 coeffOffset
             );
+            this->cx.emplace_back(atom.coords.x());
+            this->cy.emplace_back(atom.coords.y());
+            this->cz.emplace_back(atom.coords.z());
+
+            shellIndex++;
             primOffset += rawShell.exponents.size();
             aoOffset += (rawShell.angularMomentum + 1) * (rawShell.angularMomentum + 2) / 2;
             coeffOffset += rawShell.exponents.size() * (rawShell.angularMomentum + 1) * (rawShell.angularMomentum + 2) / 2;
 
-            for (const auto& exp : rawShell.exponents)
-            {
-                this->exps.emplace_back(exp);
-                this->cx.emplace_back(atom.coords.x());
-                this->cy.emplace_back(atom.coords.y());
-                this->cz.emplace_back(atom.coords.z());
-            }
+            for (const auto& exp : rawShell.exponents) { this->exps.emplace_back(exp); }
 
 
             // For a given angular momentum L, generate all components (e.g., L=1 -> px, py, pz).
@@ -101,15 +119,6 @@ Basis::Basis(const std::string& name, const std::vector<Atom>& geometry) : name(
             }
         }
     }
-    this->exps.shrink_to_fit();
-    this->coefficients.shrink_to_fit();
-    this->cx.shrink_to_fit();
-    this->cy.shrink_to_fit();
-    this->cz.shrink_to_fit();
-    this->lx.shrink_to_fit();
-    this->ly.shrink_to_fit();
-    this->lz.shrink_to_fit();
-    this->shells.shrink_to_fit();
 }
 
 

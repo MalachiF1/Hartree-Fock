@@ -29,20 +29,22 @@ void IntegralEngine::overlap(const Basis& basis, const Shell& shellA, const Shel
     EBuffer Ey(shellA.l, shellB.l);
     EBuffer Ez(shellA.l, shellB.l);
 
+    const double cxA = cx[shellA.shellIndex];
+    const double cyA = cy[shellA.shellIndex];
+    const double czA = cz[shellA.shellIndex];
+
+    const double cxB = cx[shellB.shellIndex];
+    const double cyB = cy[shellB.shellIndex];
+    const double czB = cz[shellB.shellIndex];
+
     // Loop over primitive pairs
     for (size_t pA = 0; pA < nprimA; ++pA)
     {
         const double alphaA = exps[shellA.primOffset + pA];
-        const double cxA    = cx[shellA.primOffset + pA];
-        const double cyA    = cy[shellA.primOffset + pA];
-        const double czA    = cz[shellA.primOffset + pA];
 
         for (size_t pB = 0; pB < nprimB; ++pB)
         {
             const double alphaB = exps[shellB.primOffset + pB];
-            const double cxB    = cx[shellB.primOffset + pB];
-            const double cyB    = cy[shellB.primOffset + pB];
-            const double czB    = cz[shellB.primOffset + pB];
             const Eigen::Vector3d centerA(cxA, cyA, czA);
 
             // Compute data for this primitive pair
@@ -94,20 +96,22 @@ void IntegralEngine::kinetic(const Basis& basis, const Shell& shellA, const Shel
     EBuffer Ey(shellA.l, shellB.l + 2);
     EBuffer Ez(shellA.l, shellB.l + 2);
 
+    const double cxA = cx[shellA.shellIndex];
+    const double cyA = cy[shellA.shellIndex];
+    const double czA = cz[shellA.shellIndex];
+
+    const double cxB = cx[shellB.shellIndex];
+    const double cyB = cy[shellB.shellIndex];
+    const double czB = cz[shellB.shellIndex];
+
     // Loop over primitive pairs
     for (size_t pA = 0; pA < nprimA; ++pA)
     {
         const double alphaA = exps[shellA.primOffset + pA];
-        const double cxA    = cx[shellA.primOffset + pA];
-        const double cyA    = cy[shellA.primOffset + pA];
-        const double czA    = cz[shellA.primOffset + pA];
 
         for (size_t pB = 0; pB < nprimB; ++pB)
         {
             const double alphaB = exps[shellB.primOffset + pB];
-            const double cxB    = cx[shellB.primOffset + pB];
-            const double cyB    = cy[shellB.primOffset + pB];
-            const double czB    = cz[shellB.primOffset + pB];
 
             const PrimitivePairData primPair = computePrimitivePairData(alphaA, cxA, cyA, czA, alphaB, cxB, cyB, czB);
             double prefactor                 = std::pow(M_PI / primPair.p, 1.5) * primPair.K;
@@ -176,19 +180,21 @@ void IntegralEngine::nuclearAttraction(
     EBuffer Ey(shellA.l, shellB.l);
     EBuffer Ez(shellA.l, shellB.l);
 
+    const double cxA = cx[shellA.shellIndex];
+    const double cyA = cy[shellA.shellIndex];
+    const double czA = cz[shellA.shellIndex];
+
+    const double cxB = cx[shellB.shellIndex];
+    const double cyB = cy[shellB.shellIndex];
+    const double czB = cz[shellB.shellIndex];
+
     for (size_t pA = 0; pA < nprimA; ++pA)
     {
         const double alphaA = exps[shellA.primOffset + pA];
-        const double cxA    = cx[shellA.primOffset + pA];
-        const double cyA    = cy[shellA.primOffset + pA];
-        const double czA    = cz[shellA.primOffset + pA];
 
         for (size_t pB = 0; pB < nprimB; ++pB)
         {
             const double alphaB = exps[shellB.primOffset + pB];
-            const double cxB    = cx[shellB.primOffset + pB];
-            const double cyB    = cy[shellB.primOffset + pB];
-            const double czB    = cz[shellB.primOffset + pB];
 
             const PrimitivePairData primPair = computePrimitivePairData(alphaA, cxA, cyA, czA, alphaB, cxB, cyB, czB);
             double prefactor                 = (2.0 * M_PI / primPair.p) * primPair.K;
@@ -278,12 +284,14 @@ void IntegralEngine::electronRepulsion(
 
     const double* alphaC = &exps[shellC.primOffset];
     const double* alphaD = &exps[shellD.primOffset];
-    const double* cxC    = &cx[shellC.primOffset];
-    const double* cxD    = &cx[shellD.primOffset];
-    const double* cyC    = &cy[shellC.primOffset];
-    const double* cyD    = &cy[shellD.primOffset];
-    const double* czC    = &cz[shellC.primOffset];
-    const double* czD    = &cz[shellD.primOffset];
+
+    const double cxC = cx[shellC.shellIndex];
+    const double cyC = cy[shellC.shellIndex];
+    const double czC = cz[shellC.shellIndex];
+
+    const double cxD = cx[shellD.shellIndex];
+    const double cyD = cy[shellD.shellIndex];
+    const double czD = cz[shellD.shellIndex];
 
     for (size_t pC = 0; pC < nprimC; ++pC)
     {
@@ -291,9 +299,7 @@ void IntegralEngine::electronRepulsion(
         {
             pC_indices.emplace_back(pC);
             pD_indices.emplace_back(pD);
-            primPairs_cd.emplace_back(
-                computePrimitivePairData(alphaC[pC], cxC[pC], cyC[pC], czC[pC], alphaD[pD], cxD[pD], cyD[pD], czD[pD])
-            );
+            primPairs_cd.emplace_back(computePrimitivePairData(alphaC[pC], cxC, cyC, czC, alphaD[pD], cxD, cyD, czD));
             const size_t idx = (pC * nprimD) + pD;
 
             const auto& primPair_cd = primPairs_cd[idx];
@@ -311,12 +317,14 @@ void IntegralEngine::electronRepulsion(
 
     const double* alphaA = &exps[shellA.primOffset];
     const double* alphaB = &exps[shellB.primOffset];
-    const double* cxA    = &cx[shellA.primOffset];
-    const double* cxB    = &cx[shellB.primOffset];
-    const double* cyA    = &cy[shellA.primOffset];
-    const double* cyB    = &cy[shellB.primOffset];
-    const double* czA    = &cz[shellA.primOffset];
-    const double* czB    = &cz[shellB.primOffset];
+
+    const double cxA = cx[shellA.shellIndex];
+    const double cyA = cy[shellA.shellIndex];
+    const double czA = cz[shellA.shellIndex];
+
+    const double cxB = cx[shellB.shellIndex];
+    const double cyB = cy[shellB.shellIndex];
+    const double czB = cz[shellB.shellIndex];
 
     const unsigned* lxA = &lx[shellA.aoOffset];
     const unsigned* lxB = &lx[shellB.aoOffset];
@@ -343,9 +351,7 @@ void IntegralEngine::electronRepulsion(
         {
             const double* coeffsB = &coeffs[(shellB.coeffOffset + pB * naoB)];
 
-            const PrimitivePairData primPair_ab = computePrimitivePairData(
-                alphaA[pA], cxA[pA], cyA[pA], czA[pA], alphaB[pB], cxB[pB], cyB[pB], czB[pB]
-            );
+            const PrimitivePairData primPair_ab = computePrimitivePairData(alphaA[pA], cxA, cyA, czA, alphaB[pB], cxB, cyB, czB);
 
             computeHermiteCoeffs(shellA.l, shellB.l, primPair_ab.p, primPair_ab.PAx, primPair_ab.PBx, Ex_ab);
             computeHermiteCoeffs(shellA.l, shellB.l, primPair_ab.p, primPair_ab.PAy, primPair_ab.PBy, Ey_ab);
@@ -559,12 +565,14 @@ void IntegralEngine::electronRepulsion(
 
     const double* alphaC = &exps[shellC.primOffset];
     const double* alphaD = &exps[shellD.primOffset];
-    const double* cxC    = &cx[shellC.primOffset];
-    const double* cxD    = &cx[shellD.primOffset];
-    const double* cyC    = &cy[shellC.primOffset];
-    const double* cyD    = &cy[shellD.primOffset];
-    const double* czC    = &cz[shellC.primOffset];
-    const double* czD    = &cz[shellD.primOffset];
+
+    const double cxC = cx[shellC.shellIndex];
+    const double cyC = cy[shellC.shellIndex];
+    const double czC = cz[shellC.shellIndex];
+
+    const double cxD = cx[shellD.shellIndex];
+    const double cyD = cy[shellD.shellIndex];
+    const double czD = cz[shellD.shellIndex];
 
     for (size_t pC = 0; pC < nprimC; ++pC)
     {
@@ -572,9 +580,7 @@ void IntegralEngine::electronRepulsion(
         {
             pC_indices.emplace_back(pC);
             pD_indices.emplace_back(pD);
-            primPairs_cd.emplace_back(
-                computePrimitivePairData(alphaC[pC], cxC[pC], cyC[pC], czC[pC], alphaD[pD], cxD[pD], cyD[pD], czD[pD])
-            );
+            primPairs_cd.emplace_back(computePrimitivePairData(alphaC[pC], cxC, cyC, czC, alphaD[pD], cxD, cyD, czD));
             const size_t idx = (pC * nprimD) + pD;
 
             const auto& primPair_cd = primPairs_cd[idx];
@@ -592,12 +598,14 @@ void IntegralEngine::electronRepulsion(
 
     const double* alphaA = &exps[shellA.primOffset];
     const double* alphaB = &exps[shellB.primOffset];
-    const double* cxA    = &cx[shellA.primOffset];
-    const double* cxB    = &cx[shellB.primOffset];
-    const double* cyA    = &cy[shellA.primOffset];
-    const double* cyB    = &cy[shellB.primOffset];
-    const double* czA    = &cz[shellA.primOffset];
-    const double* czB    = &cz[shellB.primOffset];
+
+    const double cxA = cx[shellA.shellIndex];
+    const double cyA = cy[shellA.shellIndex];
+    const double czA = cz[shellA.shellIndex];
+
+    const double cxB = cx[shellB.shellIndex];
+    const double cyB = cy[shellB.shellIndex];
+    const double czB = cz[shellB.shellIndex];
 
     const unsigned* lxA = &lx[shellA.aoOffset];
     const unsigned* lxB = &lx[shellB.aoOffset];
@@ -624,9 +632,7 @@ void IntegralEngine::electronRepulsion(
         {
             const double* coeffsB = &coeffs[(shellB.coeffOffset + pB * naoB)];
 
-            const PrimitivePairData primPair_ab = computePrimitivePairData(
-                alphaA[pA], cxA[pA], cyA[pA], czA[pA], alphaB[pB], cxB[pB], cyB[pB], czB[pB]
-            );
+            const PrimitivePairData primPair_ab = computePrimitivePairData(alphaA[pA], cxA, cyA, czA, alphaB[pB], cxB, cyB, czB);
 
             computeHermiteCoeffs(shellA.l, shellB.l, primPair_ab.p, primPair_ab.PAx, primPair_ab.PBx, Ex_ab);
             computeHermiteCoeffs(shellA.l, shellB.l, primPair_ab.p, primPair_ab.PAy, primPair_ab.PBy, Ey_ab);
