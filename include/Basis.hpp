@@ -22,6 +22,9 @@ struct RawShell
 };
 
 
+/**
+ * Struct to hold shell information with respect to the basis set data arrays.
+ */
 struct Shell
 {
     unsigned l;

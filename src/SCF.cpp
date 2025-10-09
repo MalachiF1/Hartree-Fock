@@ -721,13 +721,11 @@ void SCF::buildFockMatrixDirect()
 
     // F_m = F_{m-1} + I(D_m - D_{m-1})
     this->F_alpha = this->F_alpha_prev + J - K_alpha;
-    // this->F_alpha      = this->h + J - K_alpha;
     this->F_alpha_prev = this->F_alpha;
     if (this->options.unrestricted)
     {
         K_beta       = K_beta.selfadjointView<Eigen::Upper>();
         this->F_beta = this->F_beta_prev + J - K_beta;
-        // this->F_beta      = this->h + J - K_beta;
         this->F_beta_prev = this->F_beta;
     }
     else
