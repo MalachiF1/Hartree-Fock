@@ -30,6 +30,7 @@ struct Shell
     unsigned l;
     size_t nao;
     size_t nprim;
+    size_t shellIndex; // index of the shell in the basis set
     size_t primOffset;
     size_t aoOffset;
     size_t coeffOffset;
@@ -76,16 +77,18 @@ class Basis
      */
     static std::map<int, std::vector<RawShell>> readBasis(const std::string& name, const std::vector<int>& elements);
 
-  private:
+    // private:
     // Name of the basis set (e.g., "STO-3G", "6-31G").
     std::string name;
+
+    // Values per Shell.
+    std::vector<double> cx;
+    std::vector<double> cy;
+    std::vector<double> cz;
 
     // Values per primitives per shell (not per AO).
     // Indexing: primOffset + p  -  primitive p of shell
     std::vector<double> exps;
-    std::vector<double> cx;
-    std::vector<double> cy;
-    std::vector<double> cz;
 
     // Values per AO.
     // Indexing: aoOffset + a  -  atomic orbital a of shell
