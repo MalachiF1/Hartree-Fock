@@ -3,18 +3,22 @@
 # Compiler
 CXX = g++
 
-# Debugging / optimization flags
-# -g -Wall -Wextra / -O3 -march=native -flto (also add -flto in LDFLAGS)
+MODE ?= profile
 
+ifeq ($(MODE), debug)
 # Compiler flags
-CXXFLAGS = -std=c++20 -Iinclude -Ieigen -Inlohmann -Ifmt/include -fopenmp -g -pthread -fno-omit-frame-pointer -Wall -Wextra -O3
-# CXXFLAGS = -std=c++20 -Iinclude -Ieigen -Inlohmann -Ifmt/include -fopenmp -O3 -march=native -flto -O3 -funroll-loops -ffp-contract=fast -fno-math-errno -freciprocal-math -fno-trapping-math -funsafe-math-optimizations
-# -funsafe-math-optimizations
-
-# Linker flags (e.g., for linking external libraries)
-# link OpenBLAS statically
-LDFLAGS = -fopenmp -Wl,-Bstatic -lopenblas -Wl,-Bdynamic -g
-# LDFLAGS = -fopenmp -Wl,-Bstatic -lopenblas -Wl,-Bdynamic -flto
+	CXXFLAGS = -std=c++20 -Iinclude -Ieigen -Inlohmann -Ifmt/include -fopenmp -pthread -fno-omit-frame-pointer -g -Wall -Wextra -Wpedantic -O0 -fno-inline -fsanitize=address
+	LDFLAGS = -fopenmp -Wl,-Bstatic -lopenblas -Wl,-Bdynamic -g
+else ifeq ($(MODE), profile)
+	CXXFLAGS = -std=c++20 -Iinclude -Ieigen -Inlohmann -Ifmt/include -fopenmp -pthread -fno-omit-frame-pointer -g -Wall -Wextra -Wpedantic -O3 -march=native -DNDEBUG
+	LDFLAGS = -fopenmp -Wl,-Bstatic -lopenblas -Wl,-Bdynamic -g
+else ifeq ($(MODE), release)
+# Linker flags
+	CXXFLAGS = -std=c++20 -Iinclude -Ieigen -Inlohmann -Ifmt/include -fopenmp -g0 -DNDEBUG -march=native -O3  -flto -funroll-loops -ffp-contract=fast -fno-math-errno -freciprocal-math -fno-trapping-math
+ 	LDFLAGS = -fopenmp -Wl,-Bstatic -lopenblas -Wl,-Bdynamic -flto
+else
+	$(error "Invalid MODE specified. Use 'debug' or 'release'.")
+endif
 
 # Directories
 SRCDIR = src
@@ -63,10 +67,13 @@ run: all
 	./$(TARGET) $(filter-out run,$(MAKECMDGOALS))
 
 profile: all
-	# ./$(TARGET) $(filter-out run,$(MAKECMDGOALS))
-	perf record -g -- ./$(TARGET) $(filter-out profile,$(MAKECMDGOALS))
+	perf record -a -g -e cycles -- ./$(TARGET) $(filter-out profile,$(MAKECMDGOALS))
+	perf annotate -i perf.data --stdio "SCF::buildFockMatrix() [clone ._omp_fn.0]" > perf_annotate_buildFockMatrix.txt
+	perf annotate -i perf.data --stdio "IntegralEngine::electronRepulsion(Basis const&, Shell const&, Shell const&, Shell const&, Shell const&, ElectronRepulsionTensor&)" > perf_annotate_electronRepulsion.txt
+	perf annotate -i perf.data --stdio "Boys::calculateBoys(unsigned int, double, std::span<double, 18446744073709551615ul>)" > perf_annotate_boys.txt
 	perf report --stdio > perf_report.txt
 	@echo "Profiling complete. See perf_report.txt or use 'perf report' to view results."
+	@echo "See perf_annotate_buildFockMatrix.txt, perf_annotate_electronRepulsion.txt, and perf_annotate_boys.txt for annotated functions."
 
 # Clean up build artifacts
 clean:
