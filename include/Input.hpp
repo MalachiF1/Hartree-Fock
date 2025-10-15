@@ -10,7 +10,15 @@ class Input
 {
   public:
     Input(const std::string& filename);
-    std::pair<Molecule, SCFOptions> read();
+
+    struct InputSettings
+    {
+        Molecule molecule;
+        SCFOptions scfOptions;
+        BasisSet basis;
+    };
+    InputSettings read();
+
     const std::vector<std::string>& getWarnings() const;
 
   private:

@@ -20,7 +20,7 @@ const std::vector<std::string>& Input::getWarnings() const
     return this->warnings;
 }
 
-std::pair<Molecule, SCFOptions> Input::read()
+Input::InputSettings Input::read()
 {
     this->warnings.clear();
 
@@ -114,11 +114,12 @@ std::pair<Molecule, SCFOptions> Input::read()
     Molecule molecule(
         moleculeSettings.charge,
         moleculeSettings.multiplicity,
-        basisSettings.basisName,
         moleculeSettings.geometry,
         scfInputSettings.scfOptions.useSymmetry,
         scfInputSettings.scfOptions.symmetryTolerance
     );
+
+    BasisSet basis(basisSettings.basisName, moleculeSettings.geometry);
 
     SCFOptions options = scfInputSettings.scfOptions;
     if (!scfInputSettings.optionsSet[UNRESTRICTED])
@@ -136,7 +137,7 @@ std::pair<Molecule, SCFOptions> Input::read()
         options.maxLshiftIter = options.maxIter;
     }
 
-    return {molecule, options};
+    return {.molecule = molecule, .scfOptions = options, .basis = basis};
 }
 
 Input::MoleculeSettings Input::parseMoleculeBlock(const std::string& moleculeBlock)

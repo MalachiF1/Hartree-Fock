@@ -8,29 +8,31 @@
 class IntegralEngine
 {
   public:
-    static void overlap(const Basis& basis, const Shell& shellA, const Shell& shellB, Eigen::MatrixXd& S);
-    static void kinetic(const Basis& basis, const Shell& shellA, const Shell& shellB, Eigen::MatrixXd& T);
-    static void nuclearAttraction(
-        const std::vector<Atom>& geometry, const Basis& basis, const Shell& shellA, const Shell& shellB, Eigen::MatrixXd& V
-    );
+    IntegralEngine(const BasisSet& basis);
 
-    static void electronRepulsion(
-        const Basis& basis,
-        const Shell& shellA,
-        const Shell& shellB,
-        const Shell& shellC,
-        const Shell& shellD,
-        ElectronRepulsionTensor& G
-    );
+    void overlap(size_t shellA_idx, size_t shellB_idx, Eigen::MatrixXd& S) const;
+    Eigen::MatrixXd overlapMatrix() const;
 
-    static void electronRepulsion(
-        const Basis& basis,
-        const Shell& shellA,
-        const Shell& shellB,
-        const Shell& shellC,
-        const Shell& shellD,
-        std::vector<double>& G
-    );
+    void kinetic(size_t shellA_idx, size_t shellB_idx, Eigen::MatrixXd& T) const;
+    Eigen::MatrixXd kineticMatrix() const;
+
+    void nuclearAttraction(const std::vector<Atom>& geometry, size_t shellA_idx, size_t shellB_idx, Eigen::MatrixXd& V) const;
+    Eigen::MatrixXd nuclearAttractionMatrix(const std::vector<Atom>& geometry) const;
+
+    void electronRepulsion(
+        size_t shellA_idx, size_t shellB_idx, size_t shellC_idx, size_t shellD_idx, ElectronRepulsionTensor& G
+    ) const;
+
+    void electronRepulsion(
+        size_t shellA_idx, size_t shellB_idx, size_t shellC_idx, size_t shellD_idx, std::vector<double>& G
+    ) const;
+
+    ElectronRepulsionTensor electronRepulsionTensor(double threshold) const;
+
+    Eigen::MatrixXd schwartzScreeningMatrix() const;
+
+    const Eigen::VectorXi& getNAOsPerShell() const { return nAOs; }
+    const Eigen::VectorXi& getAOOffsetsPerShell() const { return aoOffsets; }
 
   private:
     /**
@@ -60,9 +62,7 @@ class IntegralEngine
     /**
      * @brief Computes pre-calculated quantities for a pair of primitive Gaussians.
      */
-    static PrimitivePairData computePrimitivePairData(
-        double alpha1, double xa, double ya, double za, double alpha2, double xb, double yb, double zb
-    );
+    static PrimitivePairData computePrimitivePairData(double alphaA, const Vec3& centerA, double alphaB, const Vec3& centerB);
 
 
     struct EBuffer
@@ -103,6 +103,7 @@ class IntegralEngine
      * @brief Computes 1D Hermite expansion coefficients E_k(i, j, a, b).
      */
     static void computeHermiteCoeffs(unsigned l1, unsigned l2, double p, double PA, double PB, EBuffer& E_buffer);
+    static void computeHermiteCoeffsTest(unsigned l1, unsigned l2, double invTwozeta, double PA, double PB, EBuffer& E_buffer);
 
 
     struct RBuffer
@@ -140,4 +141,29 @@ class IntegralEngine
     };
 
     static void computeAuxiliaryIntegrals(double p, const Vec3& PC, std::span<double> F, RBuffer& R_buffer);
+
+    // Per basis
+    size_t nShells;
+    size_t nAOsTotal;
+    size_t nShellPairs;
+    size_t nPrimitivePairsTot;
+
+    // Per shell
+    Eigen::VectorXi lShell;
+    Eigen::VectorXi primitiveOffsets;
+    Eigen::VectorXi aoOffsets;
+    Eigen::VectorXi normFactorOffsets;
+    Eigen::VectorXi nPrimitives;
+    Eigen::VectorXi nAOs;
+    Eigen::Matrix<double, 3, Eigen::Dynamic> centers;
+
+    // per primitive
+    Eigen::VectorXd alpha;
+    Eigen::VectorXd coeff;
+
+    // per AO
+    Eigen::Matrix<int, 3, Eigen::Dynamic> angularMomentum;
+
+    // per primitive per AO
+    Eigen::VectorXd normalizationFactors;
 };
