@@ -1,6 +1,5 @@
 #pragma once
 
-#include "Basis.hpp"
 #include "Utils.hpp"
 
 #include <algorithm>
@@ -101,25 +100,18 @@ class ElectronRepulsionTensor : public std::vector<double>
 
 
 /**
- * @brief Represents a molecule built from atomic orbital basis functions (which are themselves built by cartesian primitive gaussians).
+ * @brief Represents a molecule built from a set of atoms.
  *
- * This class encapsulates the properties of a molecule, including its charge, multiplicity, basis set, and geometry.
- * It provides methods to compute molecular properties such as the overlap, kinetic energy, nuclear attraction matrices,
- * the electron repulsion tensor, and the nuclear-nuclear repulsion energy.
+ * This class encapsulates the properties of a molecule, including its charge, multiplicity, geometry, and point-group
+ * symmetry. It provides methods to obtain these properties.
  *
  */
 class Molecule
 {
   public:
     Molecule(
-        int charge,
-        int multiplicity,
-        const std::string& basisName,
-        const std::vector<Atom>& geometry,
-        bool detectSymmetry      = true,
-        double symmetryTolerance = 1e-5
+        int charge, int multiplicity, const std::vector<Atom>& geometry, bool detectSymmetry = true, double symmetryTolerance = 1e-5
     );
-
 
     /**
      * @return A string containing the charge, multiplicity, number of electrons, number of basis functions, and geometry.
@@ -131,48 +123,7 @@ class Molecule
      */
     double nuclearRepulsion() const;
 
-    /**
-     * @return The overlap matrix S as an Eigen::MatrixXd.
-     */
-    Eigen::MatrixXd overlapMatrix() const;
-
-    /**
-     * @return The kinetic energy matrix T as an Eigen::MatrixXd.
-     */
-
-    /**
-     * @return The kinetic energy matrix T as an Eigen::MatrixXd.
-     */
-    Eigen::MatrixXd kineticMatrix() const;
-
-    /**
-     * @return The nuclear attraction matrix V as an Eigen::MatrixXd.
-     */
-    Eigen::MatrixXd nuclearAttractionMatrix() const;
-
-    /**
-     * Computes the electron repulsion integral tensor for the molecule.
-     *
-     * @param threshold The Schwartz screening threshold below which integrals are considered negligible and set to zero.
-     * @return A ElectronRepulsionTensor object containing the electron repulsion integrals.
-     */
-    ElectronRepulsionTensor electronRepulsionTensor(double threshold = 1e-10) const;
-
-    /**
-     * Computes the Schwartz screening matrix for the molecule.
-     * This matrix is used to screen out negligible electron repulsion integrals.
-     * This method is used by the SCF class when building the Fock matrix in the direct method.
-     * The electronRepulsionTensor method also calcultes and uses the Schwartz screening matrix,
-     * but doesn't store it (so it can set the elements in the tensor directly).
-     *
-     * @return An Eigen::MatrixXd representing the Schwartz screening matrix.
-     */
-    Eigen::MatrixXd schwartzScreeningMatrix() const;
-
     // Getters for molecule properties
-    size_t getBasisFunctionCount() const { return basisFunctionCount; }
-    size_t getShellCount() const { return basis.getShellCount(); }
-    const Basis& getBasis() const { return basis; }
     int getCharge() const { return charge; }
     size_t getMultiplicity() const { return multiplicity; }
     double getSymmetryTol() const { return symmetryTolerance; }
@@ -191,21 +142,10 @@ class Molecule
      */
     size_t countElectrons() const;
 
-    /**
-     * Builds the atomic orbitals for the molecule based on the provided basis set.
-     *
-     * @param basisName The name of the basis set to use (case insensitive).
-     * @Throws std::runtime_error if the basis set is not found.
-     */
-    // void buildBasis(const std::string& basisName);
-
     const int charge;
     const int multiplicity;
     const double symmetryTolerance;
     std::vector<Atom> geometry;
     size_t electronCount;
-    Basis basis;
     std::string pointGroupName;
-    // PointGroup pointGroup;
-    // PointGroup abelianSubgroup;
 };

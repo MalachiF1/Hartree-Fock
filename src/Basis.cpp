@@ -11,14 +11,7 @@
 #include <stdexcept>
 #include <string>
 
-std::string Shell::toString() const
-{
-    return fmt::format(
-        "Shell(l={}, nao={}, nprim={}, primOffset={}, aoOffset={}, coeffOffset={})", l, nao, nprim, primOffset, aoOffset, coeffOffset
-    );
-}
-
-Basis::Basis(const std::string& name, const std::vector<Atom>& geometry) : name(name)
+BasisSet::BasisSet(const std::string& name, const std::vector<Atom>& geometry) : name(name)
 {
     std::map<int, int> elementCount;
     for (const auto& atom : geometry) { elementCount[atom.atomicNumber]++; }
@@ -27,102 +20,73 @@ Basis::Basis(const std::string& name, const std::vector<Atom>& geometry) : name(
     for (const auto& [element, count] : elementCount) { elements.push_back(element); }
     std::map<int, std::vector<RawShell>> basisData = readBasis(name, elements);
 
-    // Reserve space
-    size_t nShells = 0;
-    size_t nPrims  = 0;
-    size_t nAOs    = 0;
-    size_t nCoeffs = 0;
-
-    for (const auto& [element, count] : elementCount)
+    nPrimitives  = 0;
+    nAOs         = 0;
+    nNormFactors = 0;
+    for (size_t i = 0; i < geometry.size(); ++i)
     {
-        const auto& shells = basisData.at(element);
-
-        nShells += shells.size() * count;
-        for (const auto& shell : shells)
-        {
-            nPrims += shell.exponents.size() * count;
-            const size_t aosInShell = (shell.angularMomentum + 1) * (shell.angularMomentum + 2) / 2;
-            nAOs += aosInShell * count;
-            nCoeffs += shell.exponents.size() * aosInShell * count;
-        }
-    }
-
-    this->exps.reserve(nPrims);
-    this->coefficients.reserve(nCoeffs);
-    this->cx.reserve(nShells);
-    this->cy.reserve(nShells);
-    this->cz.reserve(nShells);
-    this->lx.reserve(nAOs);
-    this->ly.reserve(nAOs);
-    this->lz.reserve(nAOs);
-
-    // Fill in the data
-    size_t primOffset  = 0;
-    size_t aoOffset    = 0;
-    size_t coeffOffset = 0;
-    size_t shellIndex  = 0;
-    for (const auto& atom : geometry)
-    {
-        const auto& shellsForAtom = basisData.at(atom.atomicNumber);
-
+        const auto& shellsForAtom = basisData.at(geometry[i].atomicNumber);
         for (const auto& rawShell : shellsForAtom)
         {
-            this->shells.emplace_back(
-                rawShell.angularMomentum,
-                (rawShell.angularMomentum + 1) * (rawShell.angularMomentum + 2) / 2,
-                rawShell.exponents.size(),
-                shellIndex,
-                primOffset,
-                aoOffset,
-                coeffOffset
-            );
-            this->cx.emplace_back(atom.coords.x());
-            this->cy.emplace_back(atom.coords.y());
-            this->cz.emplace_back(atom.coords.z());
+            Shell shell;
+            shell.l            = rawShell.angularMomentum;
+            shell.nPrimitives  = rawShell.exponents.size();
+            shell.nAOs         = (rawShell.angularMomentum + 1) * (rawShell.angularMomentum + 2) / 2;
+            shell.nNormFactors = shell.nPrimitives * shell.nAOs;
+            shell.atomIndex    = i;
+            shell.center       = geometry[i].coords;
 
-            shellIndex++;
-            primOffset += rawShell.exponents.size();
-            aoOffset += (rawShell.angularMomentum + 1) * (rawShell.angularMomentum + 2) / 2;
-            coeffOffset += rawShell.exponents.size() * (rawShell.angularMomentum + 1) * (rawShell.angularMomentum + 2) / 2;
+            shell.primitives.reserve(shell.nPrimitives);
+            for (size_t j = 0; j < rawShell.exponents.size(); ++j)
+            {
+                shell.primitives.emplace_back(rawShell.exponents[j], rawShell.coefficients[j]);
+            }
 
-            for (const auto& exp : rawShell.exponents) { this->exps.emplace_back(exp); }
-
-
-            // For a given angular momentum L, generate all components (e.g., L=1 -> px, py, pz).
+            shell.normalizationFactors.resize(shell.nPrimitives * shell.nAOs);
+            shell.angularMomentum.resize(3, shell.nAOs);
+            size_t aoIndex = 0;
             for (int i = rawShell.angularMomentum; i >= 0; --i)
             {
                 for (int j = rawShell.angularMomentum - i; j >= 0; --j)
                 {
                     int k = rawShell.angularMomentum - i - j;
-                    this->lx.emplace_back(i);
-                    this->ly.emplace_back(j);
-                    this->lz.emplace_back(k);
+
+                    shell.angularMomentum(0, aoIndex) = i;
+                    shell.angularMomentum(1, aoIndex) = j;
+                    shell.angularMomentum(2, aoIndex) = k;
+                    aoIndex++;
                 }
             }
 
             for (size_t l = 0; l < rawShell.exponents.size(); ++l)
             {
+                aoIndex = 0;
                 for (int i = rawShell.angularMomentum; i >= 0; --i)
                 {
                     for (int j = rawShell.angularMomentum - i; j >= 0; --j)
                     {
-                        int k = rawShell.angularMomentum - i - j;
-
+                        int k              = rawShell.angularMomentum - i - j;
                         double prefactor1  = std::pow(2.0 * rawShell.exponents[l] / M_PI, 0.75);
                         double prefactor2  = std::pow(4.0 * rawShell.exponents[l], (i + j + k) / 2.0);
                         double denominator = std::sqrt(dfact((2 * i) - 1) * dfact((2 * j) - 1) * dfact((2 * k) - 1));
                         double normFactor  = prefactor1 * prefactor2 / denominator;
-
-                        this->coefficients.emplace_back(normFactor * rawShell.coefficients[l]);
+                        shell.normalizationFactors[l * shell.nAOs + aoIndex] = normFactor;
+                        aoIndex++;
                     }
                 }
             }
+
+            shells.push_back(shell);
+            nPrimitives += shell.nPrimitives;
+            nAOs += shell.nAOs;
+            nNormFactors += shell.nPrimitives * shell.nAOs;
         }
     }
+    nShells = shells.size();
 }
 
 
-std::map<int, std::vector<RawShell>> Basis::readBasis(const std::string& name, const std::vector<int>& elements)
+std::map<int, std::vector<RawShell>> BasisSet::readBasis(const std::string& name, const std::vector<int>& elements)
 {
     // Convert name to lowercase for case-insensitive comparison.
     auto view          = name | std::ranges::views::transform(::tolower);

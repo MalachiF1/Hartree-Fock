@@ -9,11 +9,13 @@
 #include <cstddef>
 #include <cstdlib>
 #include <fmt/core.h>
-#include <ios>
-#include <iostream>
 
-SCF::SCF(const Molecule& molecule, const SCFOptions& options, std::shared_ptr<Output> output) :
-    output(output), molecule(std::make_unique<Molecule>(molecule)), options(options)
+SCF::SCF(const Molecule& molecule, const BasisSet& basis, const SCFOptions& options, std::shared_ptr<Output> output) :
+    output(output),
+    molecule(std::make_unique<Molecule>(molecule)),
+    basis(basis),
+    integralEngine(std::make_unique<IntegralEngine>(basis)),
+    options(options)
 {
 }
 
@@ -135,9 +137,8 @@ void SCF::run()
 
 void SCF::initialize(double schwartzThreshold, bool direct)
 {
-
     // Set constant parameters.
-    this->basisCount         = molecule->getBasisFunctionCount();
+    this->basisCount         = basis.nAOs;
     this->occupiedCountAlpha = (molecule->getElectronCount() + molecule->getMultiplicity() - 1) / 2;
     this->occupiedCountBeta  = (molecule->getElectronCount() - molecule->getMultiplicity() + 1) / 2;
 
@@ -145,19 +146,19 @@ void SCF::initialize(double schwartzThreshold, bool direct)
 
     // Calculate one-electron integrals and nuclear repulsion.
     this->nuclearEnergy = molecule->nuclearRepulsion();
-    this->T             = molecule->kineticMatrix();
-    this->V             = molecule->nuclearAttractionMatrix();
+    this->T             = integralEngine->kineticMatrix();
+    this->V             = integralEngine->nuclearAttractionMatrix(molecule->getGeometry());
     this->h             = this->T + this->V;
 
     // Calculate the overlap and orthogonalization matrices.
-    this->S = molecule->overlapMatrix();
+    this->S = integralEngine->overlapMatrix();
     this->X = inverseSqrtMatrix(this->S);
 
     // Calculate two-electron integrals (only if not using direct method).
     if (!direct)
-        this->Vee = molecule->electronRepulsionTensor(schwartzThreshold);
+        this->Vee = integralEngine->electronRepulsionTensor(schwartzThreshold);
     else // If using direct method, only pre-calculate the Schwartz screening matrix.
-        this->Q = molecule->schwartzScreeningMatrix();
+        this->Q = integralEngine->schwartzScreeningMatrix();
 }
 
 
@@ -222,6 +223,11 @@ void SCF::computeInitialGuessDensity()
     // Calculate the initial electronic energy.
     this->electronicEnergy = 0.5 * (this->D_alpha * (this->h + this->F_alpha)).trace()
                            + 0.5 * (this->D_beta * (this->h + this->F_beta)).trace();
+
+
+    double oneElectronEnergy = (this->D_tot * this->h).trace();
+    double twoElectronEnergy = (this->D_alpha * (this->F_alpha - this->h)).trace()
+                             + (this->D_beta * (this->F_beta - this->h)).trace();
 }
 
 void SCF::buildFockMatrix()
@@ -516,10 +522,10 @@ void SCF::buildFockMatrix()
 
 void SCF::buildFockMatrixDirect()
 {
-    const size_t N_ao    = this->basisCount;
-    const auto& basis    = this->molecule->getBasis();
-    const auto& shells   = basis.getShells();
-    const size_t nShells = shells.size();
+    const size_t N_ao     = this->basisCount;
+    const auto& nAOs      = this->integralEngine->getNAOsPerShell();
+    const auto& aoOffsets = this->integralEngine->getAOOffsetsPerShell();
+    const size_t nShells  = this->basis.nShells;
 
     Eigen::MatrixXd J       = Eigen::MatrixXd::Zero(N_ao, N_ao);
     Eigen::MatrixXd K_alpha = Eigen::MatrixXd::Zero(N_ao, N_ao);
@@ -537,7 +543,9 @@ void SCF::buildFockMatrixDirect()
     // Pre-calculate the maximum density elements for each shell pair for density screening.
     Eigen::MatrixXd deltaDtotMax   = Eigen::MatrixXd::Zero(nShells, nShells);
     Eigen::MatrixXd deltaDalphaMax = Eigen::MatrixXd::Zero(nShells, nShells);
-    Eigen::MatrixXd deltaDbetaMax  = Eigen::MatrixXd::Zero(nShells, nShells);
+    Eigen::MatrixXd deltaDbetaMax;
+    if (this->options.unrestricted)
+        deltaDbetaMax = Eigen::MatrixXd::Zero(nShells, nShells);
 
 #pragma omp parallel for collapse(2)
     for (size_t s1 = 0; s1 < nShells; ++s1)
@@ -545,9 +553,9 @@ void SCF::buildFockMatrixDirect()
         for (size_t s2 = 0; s2 <= s1; ++s2)
         {
             double maxValTot = 0.0, maxValAlpha = 0.0, maxValBeta = 0.0;
-            for (size_t a = shells[s1].aoOffset; a < shells[s1].aoOffset + shells[s1].nao; ++a)
+            for (int a = aoOffsets[s1]; a < aoOffsets[s1] + nAOs[s1]; ++a)
             {
-                for (size_t b = shells[s2].aoOffset; b < shells[s2].aoOffset + shells[s2].nao; ++b)
+                for (int b = aoOffsets[s2]; b < aoOffsets[s2] + nAOs[s2]; ++b)
                 {
                     maxValTot   = std::max(maxValTot, std::abs(deltaD_tot(a, b)));
                     maxValAlpha = std::max(maxValAlpha, std::abs(deltaD_alpha(a, b)));
@@ -614,27 +622,27 @@ void SCF::buildFockMatrixDirect()
                         if (maxDensity < this->options.densityThreshold)
                             continue;
 
-                        const auto& sa = shells[a];
-                        const auto& sb = shells[b];
-                        const auto& sc = shells[c];
-                        const auto& sd = shells[d];
+                        const int nAOa = nAOs[a];
+                        const int nAOb = nAOs[b];
+                        const int nAOc = nAOs[c];
+                        const int nAOd = nAOs[d];
 
-                        std::vector<double> ERIs(sa.nao * sb.nao * sc.nao * sd.nao, 0.0);
-                        IntegralEngine::electronRepulsion(basis, sa, sb, sc, sd, ERIs);
+                        std::vector<double> ERIs(nAOa * nAOb * nAOc * nAOd, 0.0);
+                        integralEngine->electronRepulsion(a, b, c, d, ERIs);
 
-                        const size_t naoCD  = sc.nao * sd.nao;
-                        const size_t naoBCD = sb.nao * naoCD;
-                        const size_t naoD   = sd.nao;
+                        const size_t naoCD  = nAOc * nAOd;
+                        const size_t naoBCD = nAOb * naoCD;
+                        const size_t naoD   = nAOd;
 
-                        for (size_t A = 0; A < sa.nao; ++A)
+                        for (int A = 0; A < nAOa; ++A)
                         {
-                            const size_t i           = A + sa.aoOffset;
+                            const size_t i           = A + aoOffsets[a];
                             const size_t iN_ao       = i * N_ao;
                             const size_t index_baseA = A * naoBCD;
 
-                            for (size_t B = 0; B < sb.nao; ++B)
+                            for (int B = 0; B < nAOb; ++B)
                             {
-                                const size_t j = B + sb.aoOffset;
+                                const size_t j = B + aoOffsets[b];
                                 if (j > i)
                                     continue;
 
@@ -642,18 +650,18 @@ void SCF::buildFockMatrixDirect()
                                 const size_t ji_idx      = j + iN_ao;
                                 const size_t index_baseB = index_baseA + B * naoCD;
 
-                                for (size_t C = 0; C < sc.nao; ++C)
+                                for (int C = 0; C < nAOc; ++C)
                                 {
-                                    const size_t k           = C + sc.aoOffset;
+                                    const size_t k           = C + aoOffsets[c];
                                     const size_t kN_ao       = k * N_ao;
                                     const size_t ki_idx      = k + iN_ao;
                                     const size_t kj_idx      = k + jN_ao;
                                     const size_t index_baseC = index_baseB + C * naoD;
 
                                     const size_t l_max = i == k ? j : k;
-                                    for (size_t D = 0; D < sd.nao; ++D)
+                                    for (int D = 0; D < nAOd; ++D)
                                     {
-                                        const size_t l = D + sd.aoOffset;
+                                        const size_t l = D + aoOffsets[d];
                                         if (l > l_max)
                                             continue;
 
@@ -837,6 +845,146 @@ double SCF::computeSpinSquared() const
 }
 
 
+std::vector<std::string> SCF::getAOLabels() const
+{
+    std::vector<std::string> aoLabels;
+    aoLabels.reserve(basisCount);
+    const auto& basis = this->basis;
+
+    const auto& shells = basis.shells;
+
+    const auto& geometry = this->molecule->getGeometry();
+
+    for (const auto& shell : shells)
+    {
+        const auto& angularMomentum = shell.angularMomentum;
+        const auto& atom            = geometry[shell.atomIndex];
+
+        // Get the number of atoms of same atomic number before this atom.
+        size_t atomCount = std::ranges::count_if(
+            geometry.begin(),
+            geometry.begin() + shell.atomIndex,
+            [&atom](const Atom& a) { return a.atomicNumber == atom.atomicNumber; }
+        );
+
+        for (size_t i = 0; i < shell.nAOs; ++i)
+        {
+            std::stringstream label;
+            label << fmt::format(
+                "{:<3} {:<2} {:<2} ", aoLabels.size() + 1, Utils::atomicNumberToName.at(atom.atomicNumber), atomCount + 1
+            );
+            const Eigen::Vector3i& am = angularMomentum.col(i);
+            const unsigned l = am.x(), m = am.y(), n = am.z();
+
+            switch (shell.l)
+            {
+                case 0: label << "s"; break; // s-orbital
+                case 1:
+                {
+                    std::string sublabel;
+                    if (l == 1)
+                        sublabel = "x";
+                    else if (m == 1)
+                        sublabel = "y";
+                    else if (n == 1)
+                        sublabel = "z";
+                    label << fmt::format("p{:<4}", sublabel);
+                    break;
+                }
+                case 2:
+                {
+                    std::string sublabel;
+                    if (l == 2)
+                        sublabel = "x2";
+                    else if (m == 2)
+                        sublabel = "y2";
+                    else if (n == 2)
+                        sublabel = "z2";
+                    else if (l == 1 && m == 1)
+                        sublabel = "xy";
+                    else if (l == 1 && n == 1)
+                        sublabel = "xz";
+                    else if (m == 1 && n == 1)
+                        sublabel = "yz";
+                    label << fmt::format("d{:<4}", sublabel);
+                    break;
+                }
+                case 3:
+                {
+                    std::string sublabel;
+                    if (l == 3)
+                        sublabel = "x3";
+                    else if (m == 3)
+                        sublabel = "y3";
+                    else if (n == 3)
+                        sublabel = "z3";
+                    else if (l == 2 && m == 1)
+                        label << "x2y";
+                    else if (l == 2 && n == 1)
+                        label << "x2z";
+                    else if (m == 2 && l == 1)
+                        label << "y2x";
+                    else if (m == 2 && n == 1)
+                        label << "y2z";
+                    else if (n == 2 && l == 1)
+                        label << "z2x";
+                    else if (n == 2 && m == 1)
+                        label << "z2y";
+                    else if (l == 1 && m == 1 && n == 1)
+                        sublabel = "xyz";
+                    label << fmt::format("f{:<4}", sublabel);
+                    break;
+                }
+                case 4:
+                {
+                    std::string sublabel;
+                    if (l == 4)
+                        sublabel = "x4";
+                    else if (m == 4)
+                        sublabel = "y4";
+                    else if (n == 4)
+                        sublabel = "z4";
+                    else if (l == 3 && m == 1)
+                        sublabel = "x3y";
+                    else if (l == 3 && n == 1)
+                        sublabel = "x3z";
+                    else if (m == 3 && l == 1)
+                        sublabel = "y3x";
+                    else if (m == 3 && n == 1)
+                        sublabel = "y3z";
+                    else if (n == 3 && l == 1)
+                        sublabel = "z3x";
+                    else if (n == 3 && m == 1)
+                        sublabel = "z3y";
+                    else if (l == 2 && m == 2)
+                        sublabel = "x2y2";
+                    else if (l == 2 && n == 2)
+                        sublabel = "x2z2";
+                    else if (m == 2 && n == 2)
+                        sublabel = "y2z2";
+                    else if (l == 1 && m == 1 && n == 2)
+                        sublabel = "xyz2";
+                    else if (l == 1 && n == 1 && m == 2)
+                        sublabel = "xy2z";
+                    else if (m == 1 && n == 1 && l == 2)
+                        sublabel = "x2yz";
+                    label << fmt::format("g{:<4}", sublabel);
+                    break;
+                }
+                default:
+                {
+                    label << fmt::format("{:<4}", fmt::format("({}{}{})", l, m, n));
+                    break;
+                }
+            }
+
+            aoLabels.emplace_back(label.str());
+        }
+    }
+    return aoLabels;
+}
+
+
 void SCF::printIteration() const
 {
     std::stringstream ss;
@@ -876,7 +1024,10 @@ void SCF::printFinalResults(bool converged) const
         totalEnergy
     );
 
-    std::vector<std::string> aoLabels = this->molecule->getAOLabels();
+    double oneElectronEnergy = (this->D_tot * this->h).trace();
+    double twoElectronEnergy = (this->D_alpha * (this->F_alpha - this->h)).trace()
+                             + (this->D_beta * (this->F_beta - this->h)).trace();
+    std::vector<std::string> aoLabels = getAOLabels();
 
     ss << fmt::format("\n{:-<{}}\n", "", 99);
     std::string title = this->options.unrestricted ? "Alpha Orbital Energies (a.u.)" : "Orbital Energies (a.u.)";

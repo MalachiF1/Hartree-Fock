@@ -41,7 +41,7 @@ int main(int argc, char* argv[])
         output->write("\n");
 
         // Run the SCF procedure.
-        std::pair<Molecule, SCFOptions> inputData = input.read();
+        const auto [molecule, scfOptions, basis] = input.read();
 
         // Write any warnings to the output file.
         const std::vector<std::string>& warnings = input.getWarnings();
@@ -51,7 +51,7 @@ int main(int argc, char* argv[])
             output->write("\n");
         }
 
-        SCF scf(inputData.first, inputData.second, output);
+        SCF scf(molecule, basis, scfOptions, output);
         scf.run();
     }
     catch (const std::exception& e)

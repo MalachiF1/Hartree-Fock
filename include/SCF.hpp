@@ -1,5 +1,6 @@
 #pragma once
 #include "DIIS.hpp"
+#include "IntegralEngine.hpp"
 #include "Molecule.hpp"
 #include "Output.hpp"
 
@@ -39,7 +40,7 @@ struct SCFOptions
 class SCF
 {
   public:
-    SCF(const Molecule& molecule, const SCFOptions& options, std::shared_ptr<Output> output);
+    SCF(const Molecule& molecule, const BasisSet& basis, const SCFOptions& options, std::shared_ptr<Output> output);
 
     /**
      * Runs the Self-Consistent Field (SCF) calculation.
@@ -57,10 +58,12 @@ class SCF
     void run();
 
   private:
-    const std::shared_ptr<Output> output; // output handler
-
+    const std::shared_ptr<Output> output;     // output handler
     const std::unique_ptr<Molecule> molecule; // Pointer to the molecule object.
-    const SCFOptions options;                 // SCF options and parameters.
+    const BasisSet basis;
+    const std::unique_ptr<IntegralEngine> integralEngine; // Pointer to the integral engine.
+    const SCFOptions options;                             // SCF options and parameters.
+
 
     // SCF state variables that are constant throughout the calculation.
     size_t basisCount;           // number of basis functions
@@ -136,6 +139,9 @@ class SCF
      * @return The computed value of <S^2>.
      */
     double computeSpinSquared() const;
+
+
+    std::vector<std::string> getAOLabels() const;
 
     /**
      * Write the status of a single SCF iteration to the output.

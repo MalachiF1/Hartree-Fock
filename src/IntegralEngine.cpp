@@ -1,134 +1,218 @@
 #include "IntegralEngine.hpp"
 
 #include "Boys.hpp"
+#include "Eigen/Core"
 
 #include <cassert>
 #include <cmath>
 #include <cstddef>
+#include <fmt/core.h>
 #include <span>
 #include <vector>
 
-void IntegralEngine::overlap(const Basis& basis, const Shell& shellA, const Shell& shellB, Eigen::MatrixXd& S)
+IntegralEngine::IntegralEngine(const BasisSet& unsortedBasis)
 {
-    const auto& exps   = basis.getExponents();
-    const auto& coeffs = basis.getCoefficients();
-    const auto& lx     = basis.getLx();
-    const auto& ly     = basis.getLy();
-    const auto& lz     = basis.getLz();
-    const auto& cx     = basis.getCx();
-    const auto& cy     = basis.getCy();
-    const auto& cz     = basis.getCz();
+    // Sort shells by angular momentum and contraction degree.
+    BasisSet basis = unsortedBasis;
+    // std::ranges::sort(
+    //     basis.shells,
+    //     [](const Shell& a, const Shell& b)
+    //     {
+    //         if (a.l != b.l)
+    //             return a.l < b.l;
+    //         return a.nPrimitives < b.nPrimitives;
+    //     }
+    // );
 
-    const size_t nprimA = shellA.nprim;
-    const size_t nprimB = shellB.nprim;
-    const size_t naoA   = shellA.nao;
-    const size_t naoB   = shellB.nao;
+    // Set Basis data
+    this->nShells   = basis.nShells;
+    this->nAOsTotal = basis.nAOs;
+
+    this->lShell.resize(basis.nShells);
+    this->primitiveOffsets.resize(basis.nShells);
+    this->aoOffsets.resize(basis.nShells);
+    this->normFactorOffsets.resize(basis.nShells);
+    this->nPrimitives.resize(basis.nShells);
+    this->nAOs.resize(basis.nShells);
+    this->centers.resize(3, basis.nShells);
+    this->alpha.resize(basis.nPrimitives);
+    this->coeff.resize(basis.nPrimitives);
+    this->normalizationFactors.resize(basis.nNormFactors);
+    this->angularMomentum.resize(3, basis.nAOs);
+
+    const auto& shells      = basis.shells;
+    size_t primOffset       = 0;
+    size_t aoOffset         = 0;
+    size_t normFactorOffset = 0;
+    for (size_t i = 0; i < basis.nShells; ++i)
+    {
+        lShell[i]            = shells[i].l;
+        primitiveOffsets[i]  = primOffset;
+        aoOffsets[i]         = aoOffset;
+        normFactorOffsets[i] = normFactorOffset;
+        nPrimitives[i]       = shells[i].nPrimitives;
+        nAOs[i]              = shells[i].nAOs;
+        centers.col(i)       = shells[i].center;
+
+        for (size_t j = 0; j < shells[i].nPrimitives; ++j)
+        {
+            const auto& primitive = shells[i].primitives[j];
+            alpha[primOffset + j] = primitive.exponent;
+            coeff[primOffset + j] = primitive.coefficient;
+        }
+
+        normalizationFactors.segment(normFactorOffset, shells[i].nNormFactors) = shells[i].normalizationFactors;
+
+        for (size_t j = 0; j < shells[i].nAOs; ++j)
+        {
+            angularMomentum.col(aoOffset + j) = shells[i].angularMomentum.col(j);
+        }
+
+        primOffset += shells[i].nPrimitives;
+        aoOffset += shells[i].nAOs;
+        normFactorOffset += shells[i].nNormFactors;
+    }
+}
+
+
+void IntegralEngine::overlap(size_t shellA_idx, size_t shellB_idx, Eigen::MatrixXd& S) const
+{
+    const size_t nprimA = nPrimitives[shellA_idx];
+    const size_t nprimB = nPrimitives[shellB_idx];
+    const size_t naoA   = nAOs[shellA_idx];
+    const size_t naoB   = nAOs[shellB_idx];
+
+    const unsigned lA = lShell[shellA_idx];
+    const unsigned lB = lShell[shellB_idx];
 
     // Allocate scratch space for Hermite coefficients once per shell pair.
-    EBuffer Ex(shellA.l, shellB.l);
-    EBuffer Ey(shellA.l, shellB.l);
-    EBuffer Ez(shellA.l, shellB.l);
+    EBuffer Ex(lA, lB);
+    EBuffer Ey(lA, lB);
+    EBuffer Ez(lA, lB);
 
-    const double cxA = cx[shellA.shellIndex];
-    const double cyA = cy[shellA.shellIndex];
-    const double czA = cz[shellA.shellIndex];
-
-    const double cxB = cx[shellB.shellIndex];
-    const double cyB = cy[shellB.shellIndex];
-    const double czB = cz[shellB.shellIndex];
+    const Eigen::Vector3d& cA = centers.col(shellA_idx);
+    const Eigen::Vector3d& cB = centers.col(shellB_idx);
 
     // Loop over primitive pairs
     for (size_t pA = 0; pA < nprimA; ++pA)
     {
-        const double alphaA = exps[shellA.primOffset + pA];
+        // const double alphaA = exps[shellA.primOffset + pA];
+        const double alphaA = alpha[primitiveOffsets[shellA_idx] + pA];
 
         for (size_t pB = 0; pB < nprimB; ++pB)
         {
-            const double alphaB = exps[shellB.primOffset + pB];
-            const Eigen::Vector3d centerA(cxA, cyA, czA);
+            // const double alphaB = exps[shellB.primOffset + pB];
+            const double alphaB = alpha[primitiveOffsets[shellB_idx] + pB];
+
 
             // Compute data for this primitive pair
-            const PrimitivePairData primPair = computePrimitivePairData(alphaA, cxA, cyA, czA, alphaB, cxB, cyB, czB);
+            const PrimitivePairData primPair = computePrimitivePairData(alphaA, cA, alphaB, cB);
             double prefactor                 = std::pow(M_PI / primPair.p, 1.5) * primPair.K;
 
-            computeHermiteCoeffs(shellA.l, shellB.l, primPair.p, primPair.PAx, primPair.PBx, Ex);
-            computeHermiteCoeffs(shellA.l, shellB.l, primPair.p, primPair.PAy, primPair.PBy, Ey);
-            computeHermiteCoeffs(shellA.l, shellB.l, primPair.p, primPair.PAz, primPair.PBz, Ez);
+            computeHermiteCoeffs(lShell[shellA_idx], lShell[shellB_idx], primPair.p, primPair.PAx, primPair.PBx, Ex);
+            computeHermiteCoeffs(lShell[shellA_idx], lShell[shellB_idx], primPair.p, primPair.PAy, primPair.PBy, Ey);
+            computeHermiteCoeffs(lShell[shellA_idx], lShell[shellB_idx], primPair.p, primPair.PAz, primPair.PBz, Ez);
+
+            const double coeffA    = coeff[primitiveOffsets[shellA_idx] + pA];
+            const double coeffb    = coeff[primitiveOffsets[shellB_idx] + pB];
+            const double coeffProd = coeffA * coeffb;
 
             // This primitive pair contributes to all AO pairs in the shell pair
             for (size_t a = 0; a < naoA; ++a)
             {
-                const double coeffA = coeffs[(shellA.coeffOffset + pA * naoA) + a];
+                const double normA = normalizationFactors[normFactorOffsets[shellA_idx] + pA * naoA + a];
+
+                const Eigen::Vector3i& am1 = angularMomentum.col(aoOffsets[shellA_idx] + a);
+                const unsigned l1 = am1.x(), m1 = am1.y(), n1 = am1.z();
 
                 for (size_t b = 0; b < naoB; ++b)
                 {
-                    const double coeffB = coeffs[(shellB.coeffOffset + pB * naoB) + b];
+                    const double normB = normalizationFactors[normFactorOffsets[shellB_idx] + pB * naoB + b];
 
-                    unsigned l1 = lx[shellA.aoOffset + a], m1 = ly[shellA.aoOffset + a], n1 = lz[shellA.aoOffset + a];
-                    unsigned l2 = lx[shellB.aoOffset + b], m2 = ly[shellB.aoOffset + b], n2 = lz[shellB.aoOffset + b];
+                    const Eigen::Vector3i& am2 = angularMomentum.col(aoOffsets[shellB_idx] + b);
+                    const unsigned l2 = am2.x(), m2 = am2.y(), n2 = am2.z();
 
-                    S(shellA.aoOffset + a,
-                      shellB.aoOffset + b) += coeffA * coeffB * prefactor * Ex(l1, l2, 0) * Ey(m1, m2, 0) * Ez(n1, n2, 0);
+                    S(aoOffsets[shellA_idx] + a,
+                      aoOffsets[shellB_idx]
+                          + b) += normA * normB * coeffProd * prefactor * Ex(l1, l2, 0) * Ey(m1, m2, 0) * Ez(n1, n2, 0);
                 }
             }
         }
     }
 }
 
-void IntegralEngine::kinetic(const Basis& basis, const Shell& shellA, const Shell& shellB, Eigen::MatrixXd& T)
-{
-    const auto& exps   = basis.getExponents();
-    const auto& coeffs = basis.getCoefficients();
-    const auto& lx     = basis.getLx();
-    const auto& ly     = basis.getLy();
-    const auto& lz     = basis.getLz();
-    const auto& cx     = basis.getCx();
-    const auto& cy     = basis.getCy();
-    const auto& cz     = basis.getCz();
 
-    const size_t nprimA = shellA.nprim;
-    const size_t nprimB = shellB.nprim;
-    const size_t naoA   = shellA.nao;
-    const size_t naoB   = shellB.nao;
+Eigen::MatrixXd IntegralEngine::overlapMatrix() const
+{
+    Eigen::MatrixXd S = Eigen::MatrixXd::Zero(nAOsTotal, nAOsTotal);
+
+#pragma omp parallel for collapse(2)
+    for (size_t i = 0; i < nShells; ++i)
+    {
+        // Only compute upper triangle as S is symmetric.
+        for (size_t j = i; j < nShells; ++j) { overlap(i, j, S); }
+    }
+
+    S = S.selfadjointView<Eigen::Upper>();
+
+    return S;
+}
+
+
+void IntegralEngine::kinetic(size_t shellA_idx, size_t shellB_idx, Eigen::MatrixXd& T) const
+{
+    const size_t nprimA = nPrimitives[shellA_idx];
+    const size_t nprimB = nPrimitives[shellB_idx];
+    const size_t naoA   = nAOs[shellA_idx];
+    const size_t naoB   = nAOs[shellB_idx];
+
+    const size_t primOffsetA = primitiveOffsets[shellA_idx];
+    const size_t primOffsetB = primitiveOffsets[shellB_idx];
+    const size_t aoOffsetA   = aoOffsets[shellA_idx];
+    const size_t aoOffsetB   = aoOffsets[shellB_idx];
+
+    const unsigned lA = lShell[shellA_idx];
+    const unsigned lB = lShell[shellB_idx];
 
     // Allocate scratch space. Max angular momentum needed is L+2 for kinetic integrals.
-    EBuffer Ex(shellA.l, shellB.l + 2);
-    EBuffer Ey(shellA.l, shellB.l + 2);
-    EBuffer Ez(shellA.l, shellB.l + 2);
+    EBuffer Ex(lA, lB + 2);
+    EBuffer Ey(lA, lB + 2);
+    EBuffer Ez(lA, lB + 2);
 
-    const double cxA = cx[shellA.shellIndex];
-    const double cyA = cy[shellA.shellIndex];
-    const double czA = cz[shellA.shellIndex];
-
-    const double cxB = cx[shellB.shellIndex];
-    const double cyB = cy[shellB.shellIndex];
-    const double czB = cz[shellB.shellIndex];
+    const Eigen::Vector3d& cA = centers.col(shellA_idx);
+    const Eigen::Vector3d& cB = centers.col(shellB_idx);
 
     // Loop over primitive pairs
     for (size_t pA = 0; pA < nprimA; ++pA)
     {
-        const double alphaA = exps[shellA.primOffset + pA];
+        const double alphaA = alpha[primOffsetA + pA];
 
         for (size_t pB = 0; pB < nprimB; ++pB)
         {
-            const double alphaB = exps[shellB.primOffset + pB];
+            const double alphaB = alpha[primOffsetB + pB];
 
-            const PrimitivePairData primPair = computePrimitivePairData(alphaA, cxA, cyA, czA, alphaB, cxB, cyB, czB);
+            const PrimitivePairData primPair = computePrimitivePairData(alphaA, cA, alphaB, cB);
             double prefactor                 = std::pow(M_PI / primPair.p, 1.5) * primPair.K;
 
-            computeHermiteCoeffs(shellA.l, shellB.l + 2, primPair.p, primPair.PAx, primPair.PBx, Ex);
-            computeHermiteCoeffs(shellA.l, shellB.l + 2, primPair.p, primPair.PAy, primPair.PBy, Ey);
-            computeHermiteCoeffs(shellA.l, shellB.l + 2, primPair.p, primPair.PAz, primPair.PBz, Ez);
+            computeHermiteCoeffs(lA, lB + 2, primPair.p, primPair.PAx, primPair.PBx, Ex);
+            computeHermiteCoeffs(lA, lB + 2, primPair.p, primPair.PAy, primPair.PBy, Ey);
+            computeHermiteCoeffs(lA, lB + 2, primPair.p, primPair.PAz, primPair.PBz, Ez);
+
+            const double coeffA    = coeff[primOffsetA + pA];
+            const double coeffB    = coeff[primOffsetB + pB];
+            const double coeffProd = coeffA * coeffB;
 
             for (size_t a = 0; a < naoA; ++a)
             {
-                const unsigned l1 = lx[shellA.aoOffset + a], m1 = ly[shellA.aoOffset + a], n1 = lz[shellA.aoOffset + a];
-                const double coeffA = coeffs[(shellA.coeffOffset + pA * naoA) + a];
+                const Eigen::Vector3i& am1 = angularMomentum.col(aoOffsetA + a);
+                const unsigned l1 = am1.x(), m1 = am1.y(), n1 = am1.z();
+                const double normA = normalizationFactors[normFactorOffsets[shellA_idx] + pA * naoA + a];
 
                 for (size_t b = 0; b < naoB; ++b)
                 {
-                    const unsigned l2 = lx[shellB.aoOffset + b], m2 = ly[shellB.aoOffset + b], n2 = lz[shellB.aoOffset + b];
-                    const double coeffB = coeffs[(shellB.coeffOffset + pB * naoB) + b];
+                    const Eigen::Vector3i& am2 = angularMomentum.col(aoOffsetB + b);
+                    const unsigned l2 = am2.x(), m2 = am2.y(), n2 = am2.z();
+                    const double normB = normalizationFactors[normFactorOffsets[shellB_idx] + pB * naoB + b];
 
                     double term1 = alphaB * (2 * (l2 + m2 + n2) + 3) * Ex(l1, l2, 0) * Ey(m1, m2, 0) * Ez(n1, n2, 0);
 
@@ -146,63 +230,79 @@ void IntegralEngine::kinetic(const Basis& basis, const Shell& shellA, const Shel
                         term3 -= n2 * (n2 - 1) * Ex(l1, l2, 0) * Ey(m1, m2, 0) * Ez(n1, n2 - 2, 0);
                     term3 *= 0.5;
 
-                    T(shellA.aoOffset + a, shellB.aoOffset + b) += coeffA * coeffB * prefactor * (term1 + term2 + term3);
+                    T(aoOffsetA + a, aoOffsetB + b) += normA * normB * coeffProd * prefactor * (term1 + term2 + term3);
                 }
             }
         }
     }
 }
 
-void IntegralEngine::nuclearAttraction(
-    const std::vector<Atom>& geometry, const Basis& basis, const Shell& shellA, const Shell& shellB, Eigen::MatrixXd& V
-)
+
+Eigen::MatrixXd IntegralEngine::kineticMatrix() const
 {
-    const auto& exps   = basis.getExponents();
-    const auto& coeffs = basis.getCoefficients();
-    const auto& lx     = basis.getLx();
-    const auto& ly     = basis.getLy();
-    const auto& lz     = basis.getLz();
-    const auto& cx     = basis.getCx();
-    const auto& cy     = basis.getCy();
-    const auto& cz     = basis.getCz();
 
-    const size_t nprimA = shellA.nprim;
-    const size_t nprimB = shellB.nprim;
-    const size_t naoA   = shellA.nao;
-    const size_t naoB   = shellB.nao;
+    Eigen::MatrixXd T = Eigen::MatrixXd::Zero(nAOsTotal, nAOsTotal);
 
-    const unsigned max_L_total = shellA.l + shellB.l;
+#pragma omp parallel for collapse(2)
+    for (size_t i = 0; i < nShells; ++i)
+    {
+        // only compute upper triangle as S is symmetric
+        for (size_t j = i; j < nShells; ++j) { IntegralEngine::kinetic(i, j, T); }
+    }
+
+    T = T.selfadjointView<Eigen::Upper>();
+
+    return T;
+}
+
+
+void IntegralEngine::nuclearAttraction(
+    const std::vector<Atom>& geometry, size_t shellA_idx, size_t shellB_idx, Eigen::MatrixXd& V
+) const
+{
+    const size_t nprimA = nPrimitives[shellA_idx];
+    const size_t nprimB = nPrimitives[shellB_idx];
+    const size_t naoA   = nAOs[shellA_idx];
+    const size_t naoB   = nAOs[shellB_idx];
+
+    const size_t primOffsetA = primitiveOffsets[shellA_idx];
+    const size_t primOffsetB = primitiveOffsets[shellB_idx];
+    const size_t aoOffsetA   = aoOffsets[shellA_idx];
+    const size_t aoOffsetB   = aoOffsets[shellB_idx];
+
+    const unsigned lA = lShell[shellA_idx];
+    const unsigned lB = lShell[shellB_idx];
+
+    const unsigned max_L_total = lA + lB;
 
     // Allocate scratch space
     RBuffer R_buffer(max_L_total);
     std::vector<double> F(R_buffer.max_l + 1);
-    EBuffer Ex(shellA.l, shellB.l);
-    EBuffer Ey(shellA.l, shellB.l);
-    EBuffer Ez(shellA.l, shellB.l);
+    EBuffer Ex(lA, lB);
+    EBuffer Ey(lA, lB);
+    EBuffer Ez(lA, lB);
 
-    const double cxA = cx[shellA.shellIndex];
-    const double cyA = cy[shellA.shellIndex];
-    const double czA = cz[shellA.shellIndex];
-
-    const double cxB = cx[shellB.shellIndex];
-    const double cyB = cy[shellB.shellIndex];
-    const double czB = cz[shellB.shellIndex];
+    const Vec3& cA = centers.col(shellA_idx);
+    const Vec3& cB = centers.col(shellB_idx);
 
     for (size_t pA = 0; pA < nprimA; ++pA)
     {
-        const double alphaA = exps[shellA.primOffset + pA];
+        const double alphaA = alpha[primOffsetA + pA];
 
         for (size_t pB = 0; pB < nprimB; ++pB)
         {
-            const double alphaB = exps[shellB.primOffset + pB];
+            const double alphaB = alpha[primOffsetB + pB];
 
-            const PrimitivePairData primPair = computePrimitivePairData(alphaA, cxA, cyA, czA, alphaB, cxB, cyB, czB);
+            const PrimitivePairData primPair = computePrimitivePairData(alphaA, cA, alphaB, cB);
             double prefactor                 = (2.0 * M_PI / primPair.p) * primPair.K;
 
-            // Hermite coefficients are independent of nuclear centers, compute once per AO pair
-            computeHermiteCoeffs(shellA.l, shellB.l, primPair.p, primPair.PAx, primPair.PBx, Ex);
-            computeHermiteCoeffs(shellA.l, shellB.l, primPair.p, primPair.PAy, primPair.PBy, Ey);
-            computeHermiteCoeffs(shellA.l, shellB.l, primPair.p, primPair.PAz, primPair.PBz, Ez);
+            computeHermiteCoeffs(lA, lB, primPair.p, primPair.PAx, primPair.PBx, Ex);
+            computeHermiteCoeffs(lA, lB, primPair.p, primPair.PAy, primPair.PBy, Ey);
+            computeHermiteCoeffs(lA, lB, primPair.p, primPair.PAz, primPair.PBz, Ez);
+
+            const double coeffA    = coeff[primOffsetA + pA];
+            const double coeffB    = coeff[primOffsetB + pB];
+            const double coeffProd = coeffA * coeffB;
 
             for (const auto& atom : geometry)
             {
@@ -214,20 +314,18 @@ void IntegralEngine::nuclearAttraction(
 
                 Boys::calculateBoys(R_buffer.max_l, T, F);
                 computeAuxiliaryIntegrals(primPair.p, PC, F, R_buffer);
-
+                
                 for (size_t a = 0; a < naoA; ++a)
                 {
-                    const unsigned l1   = lx[shellA.aoOffset + a];
-                    const unsigned m1   = ly[shellA.aoOffset + a];
-                    const unsigned n1   = lz[shellA.aoOffset + a];
-                    const double coeffA = coeffs[(shellA.coeffOffset + pA * naoA) + a];
+                    const Eigen::Vector3i& am1 = angularMomentum.col(aoOffsetA + a);
+                    const unsigned l1 = am1.x(), m1 = am1.y(), n1 = am1.z();
+                    const double normA = normalizationFactors[normFactorOffsets[shellA_idx] + pA * naoA + a];
 
                     for (size_t b = 0; b < naoB; ++b)
                     {
-                        const unsigned l2   = lx[shellB.aoOffset + b];
-                        const unsigned m2   = ly[shellB.aoOffset + b];
-                        const unsigned n2   = lz[shellB.aoOffset + b];
-                        const double coeffB = coeffs[(shellB.coeffOffset + pB * naoB) + b];
+                        const Eigen::Vector3i& am2 = angularMomentum.col(aoOffsetB + b);
+                        const unsigned l2 = am2.x(), m2 = am2.y(), n2 = am2.z();
+                        const double normB = normalizationFactors[normFactorOffsets[shellB_idx] + pB * naoB + b];
 
                         double sum = 0.0;
                         for (unsigned v = 0; v <= n1 + n2; ++v)
@@ -245,7 +343,7 @@ void IntegralEngine::nuclearAttraction(
                             sum += Ez(n1, n2, v) * sum_u;
                         }
 
-                        V(shellA.aoOffset + a, shellB.aoOffset + b) -= coeffA * coeffB * prefactor * Z * sum;
+                        V(aoOffsetA + a, aoOffsetB + b) -= normA * normB * coeffProd * prefactor * Z * sum;
                     }
                 }
             }
@@ -253,45 +351,63 @@ void IntegralEngine::nuclearAttraction(
     }
 }
 
-void IntegralEngine::electronRepulsion(
-    const Basis& basis, const Shell& shellA, const Shell& shellB, const Shell& shellC, const Shell& shellD, ElectronRepulsionTensor& G
-)
-{
-    const auto& exps   = basis.getExponents();
-    const auto& coeffs = basis.getCoefficients();
-    const auto& lx     = basis.getLx();
-    const auto& ly     = basis.getLy();
-    const auto& lz     = basis.getLz();
-    const auto& cx     = basis.getCx();
-    const auto& cy     = basis.getCy();
-    const auto& cz     = basis.getCz();
 
-    const size_t nprimA = shellA.nprim, naoA = shellA.nao;
-    const size_t nprimB = shellB.nprim, naoB = shellB.nao;
-    const size_t nprimC = shellC.nprim, naoC = shellC.nao;
-    const size_t nprimD = shellD.nprim, naoD = shellD.nao;
+Eigen::MatrixXd IntegralEngine::nuclearAttractionMatrix(const std::vector<Atom>& geometry) const
+{
+    Eigen::MatrixXd V = Eigen::MatrixXd::Zero(nAOsTotal, nAOsTotal);
+#pragma omp parallel for collapse(2)
+    for (size_t i = 0; i < nShells; ++i)
+    {
+        // only compute upper triangle as S is symmetric
+        for (size_t j = i; j < nShells; ++j) { IntegralEngine::nuclearAttraction(geometry, i, j, V); }
+    }
+
+    V = V.selfadjointView<Eigen::Upper>();
+
+    return V;
+}
+
+
+void IntegralEngine::electronRepulsion(
+    size_t shellA_idx, size_t shellB_idx, size_t shellC_idx, size_t shellD_idx, ElectronRepulsionTensor& G
+) const
+{
+    const size_t nprimA = nPrimitives[shellA_idx], naoA = nAOs[shellA_idx];
+    const size_t nprimB = nPrimitives[shellB_idx], naoB = nAOs[shellB_idx];
+    const size_t nprimC = nPrimitives[shellC_idx], naoC = nAOs[shellC_idx];
+    const size_t nprimD = nPrimitives[shellD_idx], naoD = nAOs[shellD_idx];
+
+    const size_t primOffsetA = primitiveOffsets[shellA_idx];
+    const size_t primOffsetB = primitiveOffsets[shellB_idx];
+    const size_t primOffsetC = primitiveOffsets[shellC_idx];
+    const size_t primOffsetD = primitiveOffsets[shellD_idx];
+
+    const size_t aoOffsetA = aoOffsets[shellA_idx];
+    const size_t aoOffsetB = aoOffsets[shellB_idx];
+    const size_t aoOffsetC = aoOffsets[shellC_idx];
+    const size_t aoOffsetD = aoOffsets[shellD_idx];
+
+    const unsigned lA = lShell[shellA_idx];
+    const unsigned lB = lShell[shellB_idx];
+    const unsigned lC = lShell[shellC_idx];
+    const unsigned lD = lShell[shellD_idx];
 
     // Pre-calculate and cache all (cd) pair data
     const size_t size = nprimC * nprimD;
-    std::vector<EBuffer> Ex_cd_vec(size, EBuffer(shellC.l, shellD.l));
-    std::vector<EBuffer> Ey_cd_vec(size, EBuffer(shellC.l, shellD.l));
-    std::vector<EBuffer> Ez_cd_vec(size, EBuffer(shellC.l, shellD.l));
+    std::vector<EBuffer> Ex_cd_vec(size, EBuffer(lC, lD));
+    std::vector<EBuffer> Ey_cd_vec(size, EBuffer(lC, lD));
+    std::vector<EBuffer> Ez_cd_vec(size, EBuffer(lC, lD));
     std::vector<PrimitivePairData> primPairs_cd;
     std::vector<size_t> pC_indices, pD_indices;
     primPairs_cd.reserve(size);
     pC_indices.reserve(size);
     pD_indices.reserve(size);
 
-    const double* alphaC = &exps[shellC.primOffset];
-    const double* alphaD = &exps[shellD.primOffset];
+    const double* alphaC = &alpha[primOffsetC];
+    const double* alphaD = &alpha[primOffsetD];
 
-    const double cxC = cx[shellC.shellIndex];
-    const double cyC = cy[shellC.shellIndex];
-    const double czC = cz[shellC.shellIndex];
-
-    const double cxD = cx[shellD.shellIndex];
-    const double cyD = cy[shellD.shellIndex];
-    const double czD = cz[shellD.shellIndex];
+    const Vec3& cC = centers.col(shellC_idx);
+    const Vec3& cD = centers.col(shellD_idx);
 
     for (size_t pC = 0; pC < nprimC; ++pC)
     {
@@ -299,63 +415,46 @@ void IntegralEngine::electronRepulsion(
         {
             pC_indices.emplace_back(pC);
             pD_indices.emplace_back(pD);
-            primPairs_cd.emplace_back(computePrimitivePairData(alphaC[pC], cxC, cyC, czC, alphaD[pD], cxD, cyD, czD));
+            primPairs_cd.emplace_back(computePrimitivePairData(alphaC[pC], cC, alphaD[pD], cD));
             const size_t idx = (pC * nprimD) + pD;
 
             const auto& primPair_cd = primPairs_cd[idx];
-            computeHermiteCoeffs(shellC.l, shellD.l, primPair_cd.p, primPair_cd.PAx, primPair_cd.PBx, Ex_cd_vec[idx]);
-            computeHermiteCoeffs(shellC.l, shellD.l, primPair_cd.p, primPair_cd.PAy, primPair_cd.PBy, Ey_cd_vec[idx]);
-            computeHermiteCoeffs(shellC.l, shellD.l, primPair_cd.p, primPair_cd.PAz, primPair_cd.PBz, Ez_cd_vec[idx]);
+            computeHermiteCoeffs(lC, lD, primPair_cd.p, primPair_cd.PAx, primPair_cd.PBx, Ex_cd_vec[idx]);
+            computeHermiteCoeffs(lC, lD, primPair_cd.p, primPair_cd.PAy, primPair_cd.PBy, Ey_cd_vec[idx]);
+            computeHermiteCoeffs(lC, lD, primPair_cd.p, primPair_cd.PAz, primPair_cd.PBz, Ez_cd_vec[idx]);
         }
     }
 
     // Allocate scratch space for (ab) pair and other intermediates
-    EBuffer Ex_ab(shellA.l, shellB.l), Ey_ab(shellA.l, shellB.l), Ez_ab(shellA.l, shellB.l);
-    const unsigned max_L_total = shellA.l + shellB.l + shellC.l + shellD.l;
+    EBuffer Ex_ab(lA, lB), Ey_ab(lA, lB), Ez_ab(lA, lB);
+    const unsigned max_L_total = lA + lB + lC + lD;
     RBuffer R_buffer(max_L_total);
     std::vector<double> F(R_buffer.max_l + 1);
 
-    const double* alphaA = &exps[shellA.primOffset];
-    const double* alphaB = &exps[shellB.primOffset];
+    const double* alphaA = &alpha[primOffsetA];
+    const double* alphaB = &alpha[primOffsetB];
 
-    const double cxA = cx[shellA.shellIndex];
-    const double cyA = cy[shellA.shellIndex];
-    const double czA = cz[shellA.shellIndex];
+    const Vec3& cA = centers.col(shellA_idx);
+    const Vec3& cB = centers.col(shellB_idx);
 
-    const double cxB = cx[shellB.shellIndex];
-    const double cyB = cy[shellB.shellIndex];
-    const double czB = cz[shellB.shellIndex];
-
-    const unsigned* lxA = &lx[shellA.aoOffset];
-    const unsigned* lxB = &lx[shellB.aoOffset];
-    const unsigned* lxC = &lx[shellC.aoOffset];
-    const unsigned* lxD = &lx[shellD.aoOffset];
-    const unsigned* lyA = &ly[shellA.aoOffset];
-    const unsigned* lyB = &ly[shellB.aoOffset];
-    const unsigned* lyC = &ly[shellC.aoOffset];
-    const unsigned* lyD = &ly[shellD.aoOffset];
-    const unsigned* lzA = &lz[shellA.aoOffset];
-    const unsigned* lzB = &lz[shellB.aoOffset];
-    const unsigned* lzC = &lz[shellC.aoOffset];
-    const unsigned* lzD = &lz[shellD.aoOffset];
-
-    // Create a temporary tensor to store all primitive integrals for this quartet
     std::vector<double> prim_integrals(naoA * naoB * naoC * naoD);
 
     // Loop over (ab) primitive pairs
     for (size_t pA = 0; pA < nprimA; ++pA)
     {
-        const double* coeffsA = &coeffs[(shellA.coeffOffset + pA * naoA)];
+        const double coeffA = coeff[primOffsetA + pA];
+        const double* normA = &normalizationFactors[normFactorOffsets[shellA_idx] + pA * naoA];
 
         for (size_t pB = 0; pB < nprimB; ++pB)
         {
-            const double* coeffsB = &coeffs[(shellB.coeffOffset + pB * naoB)];
+            const double coeffB = coeff[primOffsetB + pB];
+            const double* normB = &normalizationFactors[normFactorOffsets[shellB_idx] + pB * naoB];
 
-            const PrimitivePairData primPair_ab = computePrimitivePairData(alphaA[pA], cxA, cyA, czA, alphaB[pB], cxB, cyB, czB);
+            const PrimitivePairData primPair_ab = computePrimitivePairData(alphaA[pA], cA, alphaB[pB], cB);
 
-            computeHermiteCoeffs(shellA.l, shellB.l, primPair_ab.p, primPair_ab.PAx, primPair_ab.PBx, Ex_ab);
-            computeHermiteCoeffs(shellA.l, shellB.l, primPair_ab.p, primPair_ab.PAy, primPair_ab.PBy, Ey_ab);
-            computeHermiteCoeffs(shellA.l, shellB.l, primPair_ab.p, primPair_ab.PAz, primPair_ab.PBz, Ez_ab);
+            computeHermiteCoeffs(lA, lB, primPair_ab.p, primPair_ab.PAx, primPair_ab.PBx, Ex_ab);
+            computeHermiteCoeffs(lA, lB, primPair_ab.p, primPair_ab.PAy, primPair_ab.PBy, Ey_ab);
+            computeHermiteCoeffs(lA, lB, primPair_ab.p, primPair_ab.PAz, primPair_ab.PBz, Ez_ab);
 
             // Loop over cached (cd) pairs
             for (size_t cd_idx = 0; cd_idx < primPairs_cd.size(); ++cd_idx)
@@ -366,9 +465,6 @@ void IntegralEngine::electronRepulsion(
                 const EBuffer& Ex_cd    = Ex_cd_vec[cd_idx];
                 const EBuffer& Ey_cd    = Ey_cd_vec[cd_idx];
                 const EBuffer& Ez_cd    = Ez_cd_vec[cd_idx];
-
-                const double* coeffsC = &coeffs[(shellC.coeffOffset + pC * naoC)];
-                const double* coeffsD = &coeffs[(shellD.coeffOffset + pD * naoD)];
 
                 const double prefactor = (2.0 * std::pow(M_PI, 2.5)
                                           / (primPair_ab.p * primPair_cd.p * std::sqrt(primPair_ab.p + primPair_cd.p)))
@@ -387,22 +483,19 @@ void IntegralEngine::electronRepulsion(
 
                 for (size_t a = 0; a < naoA; ++a)
                 {
-                    const size_t i          = shellA.aoOffset + a;
-                    const size_t big_I_base = i * (i + 1) / 2;
-                    const unsigned l1       = lxA[a];
-                    const unsigned m1       = lyA[a];
-                    const unsigned n1       = lzA[a];
+                    const size_t i             = aoOffsetA + a;
+                    const size_t big_I_base    = i * (i + 1) / 2;
+                    const Eigen::Vector3i& am1 = angularMomentum.col(aoOffsetA + a);
+                    const unsigned l1 = am1.x(), m1 = am1.y(), n1 = am1.z();
 
                     for (size_t b = 0; b < naoB; ++b)
                     {
-                        const size_t j = shellB.aoOffset + b;
+                        const size_t j = aoOffsetB + b;
                         if (j > i) // Exploit permutational symmetry
                             continue;
-                        const size_t big_I = big_I_base + j;
-
-                        const unsigned l2 = lxB[b];
-                        const unsigned m2 = lyB[b];
-                        const unsigned n2 = lzB[b];
+                        const size_t big_I         = big_I_base + j;
+                        const Eigen::Vector3i& am2 = angularMomentum.col(aoOffsetB + b);
+                        const unsigned l2 = am2.x(), m2 = am2.y(), n2 = am2.z();
 
                         const Eigen::Map<const Eigen::ArrayXd> Ex_ab_array(&Ex_ab(l1, l2, 0), l1 + l2 + 1);
                         const Eigen::Map<const Eigen::ArrayXd> Ey_ab_array(&Ey_ab(m1, m2, 0), m1 + m2 + 1);
@@ -410,25 +503,22 @@ void IntegralEngine::electronRepulsion(
 
                         for (size_t c = 0; c < naoC; ++c)
                         {
-                            const size_t k          = shellC.aoOffset + c;
-                            const size_t big_K_base = k * (k + 1) / 2;
-                            const unsigned l3       = lxC[c];
-                            const unsigned m3       = lyC[c];
-                            const unsigned n3       = lzC[c];
+                            const size_t k             = aoOffsetC + c;
+                            const size_t big_K_base    = k * (k + 1) / 2;
+                            const Eigen::Vector3i& am3 = angularMomentum.col(aoOffsetC + c);
+                            const unsigned l3 = am3.x(), m3 = am3.y(), n3 = am3.z();
 
                             for (size_t d = 0; d < naoD; ++d)
                             {
-                                const size_t l = shellD.aoOffset + d;
+                                const size_t l = aoOffsetD + d;
 
                                 if (l > k)
                                     continue;
                                 const size_t big_K = big_K_base + l;
-                                if ((&shellA == &shellC && &shellB == &shellD) && big_I < big_K)
+                                if ((shellA_idx == shellC_idx && shellB_idx == shellD_idx) && big_I < big_K)
                                     continue;
-
-                                const unsigned l4 = lxD[d];
-                                const unsigned m4 = lyD[d];
-                                const unsigned n4 = lzD[d];
+                                const Eigen::Vector3i& am4 = angularMomentum.col(aoOffsetD + d);
+                                const unsigned l4 = am4.x(), m4 = am4.y(), n4 = am4.z();
 
                                 const Eigen::Map<const Eigen::ArrayXd> Ex_cd_array(&Ex_cd(l3, l4, 0), l3 + l4 + 1);
                                 const Eigen::Map<const Eigen::ArrayXd> Ey_cd_array(&Ey_cd(m3, m4, 0), m3 + m4 + 1);
@@ -485,45 +575,52 @@ void IntegralEngine::electronRepulsion(
                     }
                 }
 
+                const double coeffC = coeff[primOffsetC + pC];
+                const double coeffD = coeff[primOffsetD + pD];
+                const double* normC = &normalizationFactors[normFactorOffsets[shellC_idx] + pC * naoC];
+                const double* normD = &normalizationFactors[normFactorOffsets[shellD_idx] + pD * naoD];
+
+                const double coeffProd = coeffA * coeffB * coeffC * coeffD;
+
                 // Contract Integrals
                 for (size_t a = 0; a < naoA; ++a)
                 {
-                    const size_t i          = shellA.aoOffset + a;
+                    const size_t i          = aoOffsetA + a;
                     const size_t big_I_base = i * (i + 1) / 2;
-                    const double cA         = coeffsA[a];
+                    const double nA         = normA[a];
 
                     for (size_t b = 0; b < naoB; ++b)
                     {
-                        const size_t j = shellB.aoOffset + b;
+                        const size_t j = aoOffsetB + b;
                         if (j > i)
                             continue;
                         const size_t big_I = big_I_base + j;
 
-                        const double cB = coeffsB[b];
+                        const double nB = normB[b];
 
                         for (size_t c = 0; c < naoC; ++c)
                         {
-                            const size_t k          = shellC.aoOffset + c;
+                            const size_t k          = aoOffsetC + c;
                             const size_t big_K_base = k * (k + 1) / 2;
 
-                            const double cC = coeffsC[c];
+                            const double nC = normC[c];
 
                             for (size_t d = 0; d < naoD; ++d)
                             {
-                                const size_t l = shellD.aoOffset + d;
+                                const size_t l = aoOffsetD + d;
                                 if (l > k)
                                     continue;
                                 const size_t big_K = big_K_base + l;
 
-                                if ((&shellA == &shellC && &shellB == &shellD) && big_I < big_K)
+                                if ((shellA_idx == shellC_idx && shellB_idx == shellD_idx) && big_I < big_K)
                                     continue;
 
-                                const double cD = coeffsD[d];
+                                const double nD = normD[d];
 
                                 const size_t index = big_I >= big_K ? (big_I * (big_I + 1) / 2 + big_K)
                                                                     : (big_K * (big_K + 1) / 2 + big_I);
 
-                                G[index] += cA * cB * cC * cD * prefactor
+                                G[index] += nA * nB * nC * nD * coeffProd * prefactor
                                           * prim_integrals[a * naoBCD + b * naoCD + c * naoD + d];
                             }
                         }
@@ -534,45 +631,143 @@ void IntegralEngine::electronRepulsion(
     }
 }
 
-void IntegralEngine::electronRepulsion(
-    const Basis& basis, const Shell& shellA, const Shell& shellB, const Shell& shellC, const Shell& shellD, std::vector<double>& G
-)
-{
-    const auto& exps   = basis.getExponents();
-    const auto& coeffs = basis.getCoefficients();
-    const auto& lx     = basis.getLx();
-    const auto& ly     = basis.getLy();
-    const auto& lz     = basis.getLz();
-    const auto& cx     = basis.getCx();
-    const auto& cy     = basis.getCy();
-    const auto& cz     = basis.getCz();
 
-    const size_t nprimA = shellA.nprim, naoA = shellA.nao;
-    const size_t nprimB = shellB.nprim, naoB = shellB.nao;
-    const size_t nprimC = shellC.nprim, naoC = shellC.nao;
-    const size_t nprimD = shellD.nprim, naoD = shellD.nao;
+ElectronRepulsionTensor IntegralEngine::electronRepulsionTensor(double threshold) const
+{
+    Eigen::MatrixXd Q(nShells, nShells);
+    ElectronRepulsionTensor Vee(nAOsTotal);
+
+#pragma omp parallel for collapse(2)
+    for (size_t i = 0; i < nShells; ++i)
+    {
+        for (size_t j = 0; j <= i; ++j)
+        {
+            IntegralEngine::electronRepulsion(i, j, i, j, Vee);
+
+            double maxVal = 0;
+            for (int a = 0; a < nAOs[i]; ++a)
+            {
+                for (int b = 0; b < nAOs[j]; ++b)
+                {
+                    double val = Vee(aoOffsets[i] + a, aoOffsets[j] + b, aoOffsets[i] + a, aoOffsets[j] + b);
+                    maxVal     = std::max(maxVal, val);
+                }
+            }
+
+            Q(j, i) = maxVal;
+        }
+    }
+
+    Q = Q.selfadjointView<Eigen::Upper>();
+    Q = Q.cwiseSqrt();
+
+#pragma omp parallel for collapse(4) schedule(dynamic, 64)
+    for (size_t i = 0; i < nShells; ++i)
+    {
+        for (size_t j = 0; j < nShells; ++j)
+        {
+            for (size_t k = 0; k < nShells; ++k)
+            {
+                for (size_t l = 0; l < nShells; ++l)
+                {
+                    // no need to recalculate identical elements of the tensor (enforce quartet symmetry)
+                    if (j > i || l > k || (i * (i + 1) / 2 + j) < (k * (k + 1) / 2 + l))
+                        continue;
+
+                    // make sure we did not already calculate this integral in Schwartz screening loop
+                    if ((i == k && j == l) || (i == l && j == k))
+                        continue;
+
+                    // apply Schwartz screening at the shell level
+                    if (Q(i, j) * Q(k, l) < threshold)
+                        continue;
+
+                    IntegralEngine::electronRepulsion(i, j, k, l, Vee);
+                }
+            }
+        }
+    }
+
+    return Vee;
+}
+
+
+Eigen::MatrixXd IntegralEngine::schwartzScreeningMatrix() const
+{
+    Eigen::MatrixXd Q(nShells, nShells);
+
+#pragma omp parallel for collapse(2)
+    for (size_t i = 0; i < nShells; ++i)
+    {
+        for (size_t j = 0; j <= i; ++j)
+        {
+            std::vector<double> ERIs(nAOs[i] * nAOs[j] * nAOs[i] * nAOs[j], 0.0);
+            IntegralEngine::electronRepulsion(i, j, i, j, ERIs);
+
+            const size_t aOffset = nAOs[j] * nAOs[i] * nAOs[j] + nAOs[j];
+            const size_t bOffset = nAOs[i] * nAOs[j] + 1;
+
+            double maxVal = 0;
+            for (int a = 0; a < nAOs[i]; ++a)
+            {
+                for (int b = 0; b < nAOs[j]; ++b)
+                {
+                    double val = ERIs[a * aOffset + b * bOffset];
+                    maxVal     = std::max(maxVal, val);
+                }
+            }
+
+            Q(j, i) = maxVal;
+        }
+    }
+
+    Q = Q.selfadjointView<Eigen::Upper>();
+    Q = Q.cwiseSqrt();
+
+    return Q;
+}
+
+
+void IntegralEngine::electronRepulsion(
+    size_t shellA_idx, size_t shellB_idx, size_t shellC_idx, size_t shellD_idx, std::vector<double>& G
+) const
+{
+    const size_t nprimA = nPrimitives[shellA_idx], naoA = nAOs[shellA_idx];
+    const size_t nprimB = nPrimitives[shellB_idx], naoB = nAOs[shellB_idx];
+    const size_t nprimC = nPrimitives[shellC_idx], naoC = nAOs[shellC_idx];
+    const size_t nprimD = nPrimitives[shellD_idx], naoD = nAOs[shellD_idx];
+
+    const size_t primOffsetA = primitiveOffsets[shellA_idx];
+    const size_t primOffsetB = primitiveOffsets[shellB_idx];
+    const size_t primOffsetC = primitiveOffsets[shellC_idx];
+    const size_t primOffsetD = primitiveOffsets[shellD_idx];
+
+    const size_t aoOffsetA = aoOffsets[shellA_idx];
+    const size_t aoOffsetB = aoOffsets[shellB_idx];
+    const size_t aoOffsetC = aoOffsets[shellC_idx];
+    const size_t aoOffsetD = aoOffsets[shellD_idx];
+
+    const unsigned lA = lShell[shellA_idx];
+    const unsigned lB = lShell[shellB_idx];
+    const unsigned lC = lShell[shellC_idx];
+    const unsigned lD = lShell[shellD_idx];
 
     // Pre-calculate and cache all (cd) pair data
     const size_t size = nprimC * nprimD;
-    std::vector<EBuffer> Ex_cd_vec(size, EBuffer(shellC.l, shellD.l));
-    std::vector<EBuffer> Ey_cd_vec(size, EBuffer(shellC.l, shellD.l));
-    std::vector<EBuffer> Ez_cd_vec(size, EBuffer(shellC.l, shellD.l));
+    std::vector<EBuffer> Ex_cd_vec(size, EBuffer(lC, lD));
+    std::vector<EBuffer> Ey_cd_vec(size, EBuffer(lC, lD));
+    std::vector<EBuffer> Ez_cd_vec(size, EBuffer(lC, lD));
     std::vector<PrimitivePairData> primPairs_cd;
     std::vector<size_t> pC_indices, pD_indices;
     primPairs_cd.reserve(size);
     pC_indices.reserve(size);
     pD_indices.reserve(size);
 
-    const double* alphaC = &exps[shellC.primOffset];
-    const double* alphaD = &exps[shellD.primOffset];
+    const double* alphaC = &alpha[primOffsetC];
+    const double* alphaD = &alpha[primOffsetD];
 
-    const double cxC = cx[shellC.shellIndex];
-    const double cyC = cy[shellC.shellIndex];
-    const double czC = cz[shellC.shellIndex];
-
-    const double cxD = cx[shellD.shellIndex];
-    const double cyD = cy[shellD.shellIndex];
-    const double czD = cz[shellD.shellIndex];
+    const Vec3& cC = centers.col(shellC_idx);
+    const Vec3& cD = centers.col(shellD_idx);
 
     for (size_t pC = 0; pC < nprimC; ++pC)
     {
@@ -580,45 +775,28 @@ void IntegralEngine::electronRepulsion(
         {
             pC_indices.emplace_back(pC);
             pD_indices.emplace_back(pD);
-            primPairs_cd.emplace_back(computePrimitivePairData(alphaC[pC], cxC, cyC, czC, alphaD[pD], cxD, cyD, czD));
+            primPairs_cd.emplace_back(computePrimitivePairData(alphaC[pC], cC, alphaD[pD], cD));
             const size_t idx = (pC * nprimD) + pD;
 
             const auto& primPair_cd = primPairs_cd[idx];
-            computeHermiteCoeffs(shellC.l, shellD.l, primPair_cd.p, primPair_cd.PAx, primPair_cd.PBx, Ex_cd_vec[idx]);
-            computeHermiteCoeffs(shellC.l, shellD.l, primPair_cd.p, primPair_cd.PAy, primPair_cd.PBy, Ey_cd_vec[idx]);
-            computeHermiteCoeffs(shellC.l, shellD.l, primPair_cd.p, primPair_cd.PAz, primPair_cd.PBz, Ez_cd_vec[idx]);
+            computeHermiteCoeffs(lC, lD, primPair_cd.p, primPair_cd.PAx, primPair_cd.PBx, Ex_cd_vec[idx]);
+            computeHermiteCoeffs(lC, lD, primPair_cd.p, primPair_cd.PAy, primPair_cd.PBy, Ey_cd_vec[idx]);
+            computeHermiteCoeffs(lC, lD, primPair_cd.p, primPair_cd.PAz, primPair_cd.PBz, Ez_cd_vec[idx]);
         }
     }
 
     // Allocate scratch space for (ab) pair and other intermediates
-    EBuffer Ex_ab(shellA.l, shellB.l), Ey_ab(shellA.l, shellB.l), Ez_ab(shellA.l, shellB.l);
-    const unsigned max_L_total = shellA.l + shellB.l + shellC.l + shellD.l;
+    EBuffer Ex_ab(lA, lB), Ey_ab(lA, lB), Ez_ab(lA, lB);
+    const unsigned max_L_total = lA + lB + lC + lD;
     RBuffer R_buffer(max_L_total);
     std::vector<double> F(R_buffer.max_l + 1);
 
-    const double* alphaA = &exps[shellA.primOffset];
-    const double* alphaB = &exps[shellB.primOffset];
+    const double* alphaA = &alpha[primOffsetA];
+    const double* alphaB = &alpha[primOffsetB];
 
-    const double cxA = cx[shellA.shellIndex];
-    const double cyA = cy[shellA.shellIndex];
-    const double czA = cz[shellA.shellIndex];
+    const Vec3& cA = centers.col(shellA_idx);
+    const Vec3& cB = centers.col(shellB_idx);
 
-    const double cxB = cx[shellB.shellIndex];
-    const double cyB = cy[shellB.shellIndex];
-    const double czB = cz[shellB.shellIndex];
-
-    const unsigned* lxA = &lx[shellA.aoOffset];
-    const unsigned* lxB = &lx[shellB.aoOffset];
-    const unsigned* lxC = &lx[shellC.aoOffset];
-    const unsigned* lxD = &lx[shellD.aoOffset];
-    const unsigned* lyA = &ly[shellA.aoOffset];
-    const unsigned* lyB = &ly[shellB.aoOffset];
-    const unsigned* lyC = &ly[shellC.aoOffset];
-    const unsigned* lyD = &ly[shellD.aoOffset];
-    const unsigned* lzA = &lz[shellA.aoOffset];
-    const unsigned* lzB = &lz[shellB.aoOffset];
-    const unsigned* lzC = &lz[shellC.aoOffset];
-    const unsigned* lzD = &lz[shellD.aoOffset];
 
     // Create a temporary tensor to store all primitive integrals for this quartet
     std::vector<double> prim_integrals(naoA * naoB * naoC * naoD);
@@ -626,17 +804,20 @@ void IntegralEngine::electronRepulsion(
     // Loop over (ab) primitive pairs
     for (size_t pA = 0; pA < nprimA; ++pA)
     {
-        const double* coeffsA = &coeffs[(shellA.coeffOffset + pA * naoA)];
+        const double coeffA = coeff[primOffsetA + pA];
+        const double* normA = &normalizationFactors[normFactorOffsets[shellA_idx] + pA * naoA];
+
 
         for (size_t pB = 0; pB < nprimB; ++pB)
         {
-            const double* coeffsB = &coeffs[(shellB.coeffOffset + pB * naoB)];
+            const double coeffB = coeff[primOffsetB + pB];
+            const double* normB = &normalizationFactors[normFactorOffsets[shellB_idx] + pB * naoB];
 
-            const PrimitivePairData primPair_ab = computePrimitivePairData(alphaA[pA], cxA, cyA, czA, alphaB[pB], cxB, cyB, czB);
+            const PrimitivePairData primPair_ab = computePrimitivePairData(alphaA[pA], cA, alphaB[pB], cB);
 
-            computeHermiteCoeffs(shellA.l, shellB.l, primPair_ab.p, primPair_ab.PAx, primPair_ab.PBx, Ex_ab);
-            computeHermiteCoeffs(shellA.l, shellB.l, primPair_ab.p, primPair_ab.PAy, primPair_ab.PBy, Ey_ab);
-            computeHermiteCoeffs(shellA.l, shellB.l, primPair_ab.p, primPair_ab.PAz, primPair_ab.PBz, Ez_ab);
+            computeHermiteCoeffs(lA, lB, primPair_ab.p, primPair_ab.PAx, primPair_ab.PBx, Ex_ab);
+            computeHermiteCoeffs(lA, lB, primPair_ab.p, primPair_ab.PAy, primPair_ab.PBy, Ey_ab);
+            computeHermiteCoeffs(lA, lB, primPair_ab.p, primPair_ab.PAz, primPair_ab.PBz, Ez_ab);
 
             // Loop over cached (cd) pairs
             for (size_t cd_idx = 0; cd_idx < primPairs_cd.size(); ++cd_idx)
@@ -647,9 +828,6 @@ void IntegralEngine::electronRepulsion(
                 const EBuffer& Ex_cd    = Ex_cd_vec[cd_idx];
                 const EBuffer& Ey_cd    = Ey_cd_vec[cd_idx];
                 const EBuffer& Ez_cd    = Ez_cd_vec[cd_idx];
-
-                const double* coeffsC = &coeffs[(shellC.coeffOffset + pC * naoC)];
-                const double* coeffsD = &coeffs[(shellD.coeffOffset + pD * naoD)];
 
                 const double prefactor = (2.0 * std::pow(M_PI, 2.5)
                                           / (primPair_ab.p * primPair_cd.p * std::sqrt(primPair_ab.p + primPair_cd.p)))
@@ -668,22 +846,19 @@ void IntegralEngine::electronRepulsion(
 
                 for (size_t a = 0; a < naoA; ++a)
                 {
-                    const size_t i          = shellA.aoOffset + a;
-                    const size_t big_I_base = i * (i + 1) / 2;
-                    const unsigned l1       = lxA[a];
-                    const unsigned m1       = lyA[a];
-                    const unsigned n1       = lzA[a];
+                    const size_t i             = aoOffsetA + a;
+                    const size_t big_I_base    = i * (i + 1) / 2;
+                    const Eigen::Vector3i& am1 = angularMomentum.col(aoOffsetA + a);
+                    const unsigned l1 = am1.x(), m1 = am1.y(), n1 = am1.z();
 
                     for (size_t b = 0; b < naoB; ++b)
                     {
-                        const size_t j = shellB.aoOffset + b;
+                        const size_t j = aoOffsetB + b;
                         if (j > i) // Exploit permutational symmetry
                             continue;
-                        const size_t big_I = big_I_base + j;
-
-                        const unsigned l2 = lxB[b];
-                        const unsigned m2 = lyB[b];
-                        const unsigned n2 = lzB[b];
+                        const size_t big_I         = big_I_base + j;
+                        const Eigen::Vector3i& am2 = angularMomentum.col(aoOffsetB + b);
+                        const unsigned l2 = am2.x(), m2 = am2.y(), n2 = am2.z();
 
                         const Eigen::Map<const Eigen::ArrayXd> Ex_ab_array(&Ex_ab(l1, l2, 0), l1 + l2 + 1);
                         const Eigen::Map<const Eigen::ArrayXd> Ey_ab_array(&Ey_ab(m1, m2, 0), m1 + m2 + 1);
@@ -691,25 +866,22 @@ void IntegralEngine::electronRepulsion(
 
                         for (size_t c = 0; c < naoC; ++c)
                         {
-                            const size_t k          = shellC.aoOffset + c;
-                            const size_t big_K_base = k * (k + 1) / 2;
-                            const unsigned l3       = lxC[c];
-                            const unsigned m3       = lyC[c];
-                            const unsigned n3       = lzC[c];
+                            const size_t k             = aoOffsetC + c;
+                            const size_t big_K_base    = k * (k + 1) / 2;
+                            const Eigen::Vector3i& am3 = angularMomentum.col(aoOffsetC + c);
+                            const unsigned l3 = am3.x(), m3 = am3.y(), n3 = am3.z();
 
                             for (size_t d = 0; d < naoD; ++d)
                             {
-                                const size_t l = shellD.aoOffset + d;
+                                const size_t l = aoOffsetD + d;
 
                                 if (l > k)
                                     continue;
                                 const size_t big_K = big_K_base + l;
-                                if ((&shellA == &shellC && &shellB == &shellD) && big_I < big_K)
+                                if ((shellA_idx == shellC_idx && shellB_idx == shellD_idx) && big_I < big_K)
                                     continue;
-
-                                const unsigned l4 = lxD[d];
-                                const unsigned m4 = lyD[d];
-                                const unsigned n4 = lzD[d];
+                                const Eigen::Vector3i& am4 = angularMomentum.col(aoOffsetD + d);
+                                const unsigned l4 = am4.x(), m4 = am4.y(), n4 = am4.z();
 
                                 const Eigen::Map<const Eigen::ArrayXd> Ex_cd_array(&Ex_cd(l3, l4, 0), l3 + l4 + 1);
                                 const Eigen::Map<const Eigen::ArrayXd> Ey_cd_array(&Ey_cd(m3, m4, 0), m3 + m4 + 1);
@@ -766,42 +938,49 @@ void IntegralEngine::electronRepulsion(
                     }
                 }
 
+                const double coeffC = coeff[primOffsetC + pC];
+                const double coeffD = coeff[primOffsetD + pD];
+                const double* normC = &normalizationFactors[normFactorOffsets[shellC_idx] + pC * naoC];
+                const double* normD = &normalizationFactors[normFactorOffsets[shellD_idx] + pD * naoD];
+
+                const double coeffProd = coeffA * coeffB * coeffC * coeffD;
+
                 // Contract Integrals
                 for (size_t a = 0; a < naoA; ++a)
                 {
-                    const size_t i          = shellA.aoOffset + a;
+                    const size_t i          = aoOffsetA + a;
                     const size_t big_I_base = i * (i + 1) / 2;
-                    const double cA         = coeffsA[a];
+                    const double nA         = normA[a];
 
                     for (size_t b = 0; b < naoB; ++b)
                     {
-                        const size_t j = shellB.aoOffset + b;
+                        const size_t j = aoOffsetB + b;
                         if (j > i)
                             continue;
                         const size_t big_I = big_I_base + j;
 
-                        const double cB = coeffsB[b];
+                        const double nB = normB[b];
 
                         for (size_t c = 0; c < naoC; ++c)
                         {
-                            const size_t k          = shellC.aoOffset + c;
+                            const size_t k          = aoOffsetC + c;
                             const size_t big_K_base = k * (k + 1) / 2;
 
-                            const double cC = coeffsC[c];
+                            const double nC = normC[c];
 
                             for (size_t d = 0; d < naoD; ++d)
                             {
-                                const size_t l = shellD.aoOffset + d;
+                                const size_t l = aoOffsetD + d;
                                 if (l > k)
                                     continue;
                                 const size_t big_K = big_K_base + l;
 
-                                if ((&shellA == &shellC && &shellB == &shellD) && big_I < big_K)
+                                if ((shellA_idx == shellC_idx && shellB_idx == shellD_idx) && big_I < big_K)
                                     continue;
 
-                                const double cD = coeffsD[d];
+                                const double nD = normD[d];
 
-                                G[a * naoBCD + b * naoCD + c * naoD + d] += cA * cB * cC * cD * prefactor
+                                G[a * naoBCD + b * naoCD + c * naoD + d] += nA * nB * nC * nD * coeffProd * prefactor
                                                                           * prim_integrals[a * naoBCD + b * naoCD + c * naoD + d];
                             }
                         }
@@ -812,30 +991,36 @@ void IntegralEngine::electronRepulsion(
     }
 }
 
+
 IntegralEngine::PrimitivePairData IntegralEngine::computePrimitivePairData(
-    double alpha1, double xa, double ya, double za, double alpha2, double xb, double yb, double zb
+    double alphaA, const Vec3& centerA, double alphaB, const Vec3& centerB
 )
 {
-    double p    = alpha1 + alpha2;
+    double p    = alphaA + alphaB;
     double oo_p = 1.0 / p; // one over p
 
-    double Px = (alpha1 * xa + alpha2 * xb) * oo_p;
-    double Py = (alpha1 * ya + alpha2 * yb) * oo_p;
-    double Pz = (alpha1 * za + alpha2 * zb) * oo_p;
+    const Vec3 P  = (alphaA * centerA + alphaB * centerB) * oo_p;
+    const Vec3 PA = P - centerA;
+    const Vec3 PB = P - centerB;
 
-    double PAx = Px - xa;
-    double PAy = Py - ya;
-    double PAz = Pz - za;
+    double AmB2 = (centerA - centerB).squaredNorm();
+    double K    = std::exp(-alphaA * alphaB * oo_p * AmB2);
 
-    double PBx = Px - xb;
-    double PBy = Py - yb;
-    double PBz = Pz - zb;
-
-    double AmB2 = (xa - xb) * (xa - xb) + (ya - yb) * (ya - yb) + (za - zb) * (za - zb);
-    double K    = std::exp(-alpha1 * alpha2 * oo_p * AmB2);
-
-    return {.p = p, .K = K, .Px = Px, .Py = Py, .Pz = Pz, .PAx = PAx, .PAy = PAy, .PAz = PAz, .PBx = PBx, .PBy = PBy, .PBz = PBz};
+    return {
+        .p   = p,
+        .K   = K,
+        .Px  = P.x(),
+        .Py  = P.y(),
+        .Pz  = P.z(),
+        .PAx = PA.x(),
+        .PAy = PA.y(),
+        .PAz = PA.z(),
+        .PBx = PB.x(),
+        .PBy = PB.y(),
+        .PBz = PB.z()
+    };
 }
+
 
 void IntegralEngine::computeHermiteCoeffs(unsigned l1, unsigned l2, double p, double PA, double PB, EBuffer& E_buffer)
 {
@@ -892,6 +1077,7 @@ void IntegralEngine::computeHermiteCoeffs(unsigned l1, unsigned l2, double p, do
         }
     }
 }
+
 
 void IntegralEngine::computeAuxiliaryIntegrals(double p, const Vec3& PC, std::span<double> F, RBuffer& R_buffer)
 {

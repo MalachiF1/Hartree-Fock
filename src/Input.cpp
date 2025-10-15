@@ -20,7 +20,7 @@ const std::vector<std::string>& Input::getWarnings() const
     return this->warnings;
 }
 
-std::pair<Molecule, SCFOptions> Input::read()
+Input::InputSettings Input::read()
 {
     this->warnings.clear();
 
@@ -114,11 +114,14 @@ std::pair<Molecule, SCFOptions> Input::read()
     Molecule molecule(
         moleculeSettings.charge,
         moleculeSettings.multiplicity,
-        basisSettings.basisName,
         moleculeSettings.geometry,
         scfInputSettings.scfOptions.useSymmetry,
         scfInputSettings.scfOptions.symmetryTolerance
     );
+
+    // Important to use molecule.getGeometry() and not moleculeSettings.geometry
+    // because the Molecule constructor may have modified the geometry
+    BasisSet basis(basisSettings.basisName, molecule.getGeometry());
 
     SCFOptions options = scfInputSettings.scfOptions;
     if (!scfInputSettings.optionsSet[UNRESTRICTED])
@@ -136,7 +139,7 @@ std::pair<Molecule, SCFOptions> Input::read()
         options.maxLshiftIter = options.maxIter;
     }
 
-    return {molecule, options};
+    return {.molecule = molecule, .scfOptions = options, .basis = basis};
 }
 
 Input::MoleculeSettings Input::parseMoleculeBlock(const std::string& moleculeBlock)
@@ -491,7 +494,8 @@ void Input::validateSettings(
     if (scfSettings.scfOptions.guessMix > 0 && !unrestricted)
         errors.emplace_back("The guess_mix option can only be used with unrestricted calculations.");
 
-    if (electronCount + 1 < moleculeSettings.multiplicity || (electronCount - moleculeSettings.multiplicity) % 2 == 0)
+    if (electronCount + 1 < moleculeSettings.multiplicity || (electronCount - moleculeSettings.multiplicity) % 2 == 0
+        || moleculeSettings.multiplicity <= 0)
         errors.emplace_back("Invalid combination of charge and multiplicity.");
 
     // --- Warnings ---
