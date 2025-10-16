@@ -69,6 +69,13 @@ class PRISMEngine
     PRISMEngine(const BasisSet& basis);
 
     private:
+    /**
+     * Applies the T0 transformation for a given shell pair (generation of the [0]^m integrals).
+     *
+     * @param shellPairA Index of the first shell-pair in the shell-quartet.
+     * @param shellPairB Index of the second shell-pair in the shell-quartet.
+     */
+    Eigen::MatrixXd T0(size_t sAB, size_t sCD) const;
 
     /**
      * Represents a shell pair (A, B) before significance processing.

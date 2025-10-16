@@ -252,3 +252,45 @@ ShellPairs PRISMEngine::computeShellPairData(const BasisSet& basis) const
 
     return shellPairs;
 }
+
+
+Eigen::MatrixXd PRISMEngine::T0(size_t AB, size_t CD) const
+{
+    const Eigen::Vector3d R = shellPairs.AB.col(AB) - shellPairs.AB.col(CD);
+    const double Rsq        = R.squaredNorm();
+
+    const size_t Kab = shellPairs.K(AB);
+    const size_t Kcd = shellPairs.K(CD);
+
+    const size_t primOffsetAB = shellPairs.primPairOffsets(AB);
+    const size_t primOffsetCD = shellPairs.primPairOffsets(CD);
+
+    const unsigned lAB  = shellPairs.l.col(AB).sum();
+    const unsigned lCD  = shellPairs.l.col(CD).sum();
+    const unsigned maxL = lAB + lCD;
+
+    Eigen::MatrixXd baseIntegrals = Eigen::MatrixXd(maxL + 1, Kab * Kcd);
+
+    for (size_t i = 0; i < Kab; ++i)
+    {
+        for (size_t j = 0; j < Kcd; ++j)
+        {
+            const double twoNuSq = 1 / (shellPairs.invTwoZeta(primOffsetAB + i) + shellPairs.invTwoZeta(primOffsetCD + j));
+            const double T = 0.5 * twoNuSq * Rsq;
+            const double U = shellPairs.Up(primOffsetAB) * shellPairs.Up(primOffsetCD);
+
+            double* const colPtr = baseIntegrals.col(i * Kcd + j).data();
+
+            Boys::calculateBoys(maxL, T, std::span(colPtr, maxL + 1));
+
+            double val = U * std::sqrt(twoNuSq);
+            for (size_t m = 0; m <= maxL; ++m)
+            {
+                colPtr[m] *= val;
+                val *= twoNuSq;
+            }
+        }
+    }
+
+    return baseIntegrals;
+}
