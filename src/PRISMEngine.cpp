@@ -253,42 +253,70 @@ ShellPairs PRISMEngine::computeShellPairData(const BasisSet& basis) const
     return shellPairs;
 }
 
-
-Eigen::MatrixXd PRISMEngine::T0(size_t AB, size_t CD) const
+void PRISMEngine::computeFourCenterQuantities(
+    size_t AB, size_t CD, Eigen::Matrix<double, Eigen::Dynamic, 7>& buffer, unsigned Kab, unsigned Kcd, unsigned Ktot
+) const
 {
-    const Eigen::Vector3d R = shellPairs.AB.col(AB) - shellPairs.AB.col(CD);
-    const double Rsq        = R.squaredNorm();
-
-    const size_t Kab = shellPairs.K(AB);
-    const size_t Kcd = shellPairs.K(CD);
-
     const size_t primOffsetAB = shellPairs.primPairOffsets(AB);
     const size_t primOffsetCD = shellPairs.primPairOffsets(CD);
 
-    const unsigned lAB  = shellPairs.l.col(AB).sum();
-    const unsigned lCD  = shellPairs.l.col(CD).sum();
-    const unsigned maxL = lAB + lCD;
+    Eigen::Matrix<double, Eigen::Dynamic, 7> fourCenterQuantities(Ktot, 7);
 
-    Eigen::MatrixXd baseIntegrals = Eigen::MatrixXd(maxL + 1, Kab * Kcd);
+    const Eigen::Vector3d R = shellPairs.AB.col(AB) - shellPairs.AB.col(CD);
+    const double Rsq        = R.squaredNorm();
 
+    // Set R for all primitive pairs
+    buffer.block(0, 0, Ktot, 3) = R.transpose().replicate(Ktot, 1);
+
+    // set |R|^2 for all primitive pairs
+    buffer.col(3).setConstant(Rsq);
+
+    // set 2 * nu^2 and U for all primitive pairs
+    const Eigen::Map<const Eigen::VectorXd> invTwoZetaMapAB(&shellPairs.invTwoZeta(primOffsetAB), Kab);
+    const Eigen::Map<const Eigen::VectorXd> invTwoZetaMapCD(&shellPairs.invTwoZeta(primOffsetCD), Kcd);
+    const Eigen::Map<const Eigen::VectorXd> UpMapAB(&shellPairs.Up(primOffsetAB), Kab);
+    const Eigen::Map<const Eigen::VectorXd> UpMapCD(&shellPairs.Up(primOffsetCD), Kcd);
+
+    size_t primPairIdx = 0;
     for (size_t i = 0; i < Kab; ++i)
     {
         for (size_t j = 0; j < Kcd; ++j)
         {
-            const double twoNuSq = 1 / (shellPairs.invTwoZeta(primOffsetAB + i) + shellPairs.invTwoZeta(primOffsetCD + j));
-            const double T = 0.5 * twoNuSq * Rsq;
-            const double U = shellPairs.Up(primOffsetAB) * shellPairs.Up(primOffsetCD);
+            buffer(primPairIdx, 4) = 1 / (invTwoZetaMapAB(i) + invTwoZetaMapCD(j));
+            buffer(primPairIdx, 6) = UpMapAB(i) * UpMapCD(j);
+            primPairIdx++;
+        }
+    }
 
-            double* const colPtr = baseIntegrals.col(i * Kcd + j).data();
+    // set 2T for all primitive pairs
+    buffer.col(5) = buffer.col(4).array() * buffer.col(3).array();
+}
 
-            Boys::calculateBoys(maxL, T, std::span(colPtr, maxL + 1));
 
-            double val = U * std::sqrt(twoNuSq);
-            for (size_t m = 0; m <= maxL; ++m)
-            {
-                colPtr[m] *= val;
-                val *= twoNuSq;
-            }
+Eigen::MatrixXd PRISMEngine::T0(size_t AB, size_t CD) const
+{
+    const size_t Kab    = shellPairs.K(AB);
+    const size_t Kcd    = shellPairs.K(CD);
+    const size_t Ktot   = Kab * Kcd;
+    const unsigned lAB  = shellPairs.l.col(AB).sum();
+    const unsigned lCD  = shellPairs.l.col(CD).sum();
+    const unsigned maxL = lAB + lCD;
+
+    Eigen::Matrix<double, Eigen::Dynamic, 7> fourCenterQuantities(Ktot, 7);
+    computeFourCenterQuantities(AB, CD, fourCenterQuantities, Kab, Kcd, Ktot);
+
+    Eigen::MatrixXd baseIntegrals = Eigen::MatrixXd(Kab * Kcd, maxL + 1);
+
+    for (size_t idx = 0; idx < Ktot; ++idx)
+    {
+        double* const colPtr = baseIntegrals.row(idx).data();
+        Boys::calculateBoys(maxL, 0.5 * fourCenterQuantities(idx, 5), std::span(colPtr, maxL + 1));
+
+        double val = fourCenterQuantities(idx, 6) * std::sqrt(fourCenterQuantities(idx, 4));
+        for (size_t m = 0; m <= maxL; ++m)
+        {
+            colPtr[m] *= val;
+            val *= fourCenterQuantities(idx, 4);
         }
     }
 

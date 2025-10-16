@@ -51,11 +51,16 @@ struct ShellPairs
 /**
  * @brief Class implementing the PRISM algorithm for efficient computation of electron repulsion integrals.
  *
- * This implementation is based on the work of Gill and Pople:
+ * This implementation is based on the following references:
+ *
  *  - Gill, P. M., & Pople, J. A. (1991). The prism algorithm for two‐electron integrals. International journal of
  * quantum chemistry, 40(6), 753-772.
+ *
  *  - Gill, P. M. (1994). Molecular integrals over Gaussian basis functions. In Advances in quantum chemistry (Vol. 25,
  * pp. 141-205). Academic Press.
+ *
+ *  - Gill, P. M., Head-Gordon, M., & Pople, J. A. (1990). Efficient computation of two-electron-repulsion integrals and
+ * their nth-order derivatives using contracted Gaussian basis sets. Journal of Physical Chemistry, 94(14), 5564-5572.
  */
 class PRISMEngine
 {
@@ -68,14 +73,23 @@ class PRISMEngine
      */
     PRISMEngine(const BasisSet& basis);
 
-    private:
+  private:
+    /**
+     * Computes the seven four-center quantities needed for the PRISM algorithm for a given shell pair: Rx, Ry, Rz,
+     * |R|^2, 2 * nu^2, 2T and U. Each row corresponds to a primitive pair, and each column corresponds to a quantity
+     * (by the aforementioned order).
+     */
+    void computeFourCenterQuantities(
+        size_t AB, size_t CD, Eigen::Matrix<double, Eigen::Dynamic, 7>& buffer, unsigned Kab, unsigned Kcd, unsigned Ktot
+    ) const;
+
     /**
      * Applies the T0 transformation for a given shell pair (generation of the [0]^m integrals).
      *
      * @param shellPairA Index of the first shell-pair in the shell-quartet.
      * @param shellPairB Index of the second shell-pair in the shell-quartet.
      */
-    Eigen::MatrixXd T0(size_t sAB, size_t sCD) const;
+    Eigen::MatrixXd T0(size_t AB, size_t CD) const;
 
     /**
      * Represents a shell pair (A, B) before significance processing.
