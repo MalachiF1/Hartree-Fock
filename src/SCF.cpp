@@ -2,6 +2,7 @@
 
 #include "DIIS.hpp"
 #include "IntegralEngine.hpp"
+#include "PRISMEngine.hpp"
 #include "Utils.hpp"
 
 #include <algorithm>
@@ -868,7 +869,7 @@ std::vector<std::string> SCF::getAOLabels() const
             label << fmt::format(
                 "{:<3} {:<2} {:<2} ", aoLabels.size() + 1, Utils::atomicNumberToName.at(atom.atomicNumber), atomCount + 1
             );
-            const Eigen::Vector3i& am = angularMomentum.row(i);
+            const Eigen::Vector3i& am = angularMomentum.col(i);
             const unsigned l = am.x(), m = am.y(), n = am.z();
 
             switch (shell.l)
