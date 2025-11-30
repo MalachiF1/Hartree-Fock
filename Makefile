@@ -3,7 +3,7 @@
 # Compiler
 CXX = g++
 
-MODE ?= profile
+MODE ?= release
 
 PREPROCESSOR_DEFINES =
 
@@ -44,7 +44,7 @@ else ifeq ($(MODE), profile)
 	LDFLAGS = -fopenmp $(BLAS_LIBS) -g
 else ifeq ($(MODE), release)
 # Linker flags
-	CXXFLAGS = -std=c++20 $(PREPROCESSOR_DEFINES) -Iinclude -Ieigen -Inlohmann -Ifmt/include $(BLAS_INCLUDE) -fopenmp -g0 -DNDEBUG -march=native -O3  -flto -funroll-loops -ffp-contract=fast -fno-math-errno -freciprocal-math -fno-trapping-math
+	CXXFLAGS = -std=c++20 $(PREPROCESSOR_DEFINES) -Iinclude -Ieigen -Inlohmann -Ifmt/include $(BLAS_INCLUDE) -fopenmp -g0 -DNDEBUG -march=native -O3 -w  -flto -funroll-loops -ffp-contract=fast -fno-math-errno -freciprocal-math -fno-trapping-math
  	LDFLAGS = -fopenmp $(BLAS_LIBS) -flto
 else
 	$(error "Invalid MODE specified. Use 'debug' or 'release'.")
