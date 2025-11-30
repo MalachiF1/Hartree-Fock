@@ -5,17 +5,47 @@ CXX = g++
 
 MODE ?= profile
 
+PREPROCESSOR_DEFINES =
+
+# Define the library name and potential installation paths for OpenBLAS
+OPENBLAS_LIB_NAME = openblas
+POSSIBLE_LIB_PATHS = /usr/lib /usr/local/lib /opt/OpenBLAS/lib
+
+# Check for the OpenBLAS library file in the possible paths
+# Note: The exact filename might vary (e.g., libopenblas.so.0, libopenblas.a)
+FOUND_OPENBLAS_LIB := $(strip $(shell find $(POSSIBLE_LIB_PATHS) -name "lib$(OPENBLAS_LIB_NAME).so*" -print -quit))
+
+# Conditional flags
+ifeq ($(FOUND_OPENBLAS_LIB),)
+    # OpenBLAS not found, no special flags needed, potentially link with default BLAS (e.g. standard libblas) or no BLAS
+    BLAS_LIBS =
+    BLAS_INCLUDE =
+
+    $(warning OpenBLAS not found, building without specific OpenBLAS linkage)
+else
+    # OpenBLAS found, extract the path and set flags
+    BLAS_LIB_PATH := $(dir $(FOUND_OPENBLAS_LIB))
+    # Remove trailing slash from path for -L flag
+    BLAS_LIB_DIR := $(patsubst %/,%,$(BLAS_LIB_PATH))
+    # Set the linker and include flags
+    BLAS_LIBS = -L$(BLAS_LIB_DIR) -l$(OPENBLAS_LIB_NAME)
+    # Assuming standard include path relative to lib path, adjust if necessary
+    BLAS_INCLUDE = -I$(BLAS_LIB_DIR)/../include
+	# Also set preprocessor definitions to enable BLAS/LAPACK in Eigen
+	PREPROCESSOR_DEFINES += -DEIGEN_USE_BLAS -DEIGEN_USE_LAPACK
+endif
+
 ifeq ($(MODE), debug)
 # Compiler flags
-	CXXFLAGS = -std=c++20 -Iinclude -Ieigen -Inlohmann -Ifmt/include -fopenmp -pthread -fno-omit-frame-pointer -g -Wall -Wextra -Wpedantic -O0 -fno-inline -fsanitize=address
-	LDFLAGS = -fopenmp -Wl,-Bstatic -lopenblas -Wl,-Bdynamic -g
+	CXXFLAGS = -std=c++20 $(PREPROCESSOR_DEFINES) -Iinclude -Ieigen -Inlohmann -Ifmt/include $(BLAS_INCLUDE) -fopenmp -pthread -fno-omit-frame-pointer -g -Wall -Wextra -Wpedantic -O0 -fno-inline -fsanitize=address
+	LDFLAGS = -fopenmp $(BLAS_LIBS) -g
 else ifeq ($(MODE), profile)
-	CXXFLAGS = -std=c++20 -Iinclude -Ieigen -Inlohmann -Ifmt/include -fopenmp -pthread -fno-omit-frame-pointer -g -Wall -Wextra -Wpedantic -O3 -march=native -DNDEBUG
-	LDFLAGS = -fopenmp -Wl,-Bstatic -lopenblas -Wl,-Bdynamic -g
+	CXXFLAGS = -std=c++20 $(PREPROCESSOR_DEFINES) -Iinclude -Ieigen -Inlohmann -Ifmt/include $(BLAS_INCLUDE) -fopenmp -pthread -fno-omit-frame-pointer -g -Wall -Wextra -Wpedantic -O3 -march=native -DNDEBUG
+	LDFLAGS = -fopenmp $(BLAS_LIBS) -g
 else ifeq ($(MODE), release)
 # Linker flags
-	CXXFLAGS = -std=c++20 -Iinclude -Ieigen -Inlohmann -Ifmt/include -fopenmp -g0 -DNDEBUG -march=native -O3  -flto -funroll-loops -ffp-contract=fast -fno-math-errno -freciprocal-math -fno-trapping-math
- 	LDFLAGS = -fopenmp -Wl,-Bstatic -lopenblas -Wl,-Bdynamic -flto
+	CXXFLAGS = -std=c++20 $(PREPROCESSOR_DEFINES) -Iinclude -Ieigen -Inlohmann -Ifmt/include $(BLAS_INCLUDE) -fopenmp -g0 -DNDEBUG -march=native -O3  -flto -funroll-loops -ffp-contract=fast -fno-math-errno -freciprocal-math -fno-trapping-math
+ 	LDFLAGS = -fopenmp $(BLAS_LIBS) -flto
 else
 	$(error "Invalid MODE specified. Use 'debug' or 'release'.")
 endif
@@ -31,7 +61,7 @@ FMT_SRC = fmt/src/format.cc
 FMT_OBJ = $(OBJDIR)/fmt.o
 
 # Executable name
-TARGET = $(BINDIR)/hf_program
+TARGET = $(BINDIR)/Hartree-Fock
 
 # Automatically find all .cpp files in the source directory
 SOURCES = $(wildcard $(SRCDIR)/*.cpp $(SRCDIR)/*/*.cpp)
