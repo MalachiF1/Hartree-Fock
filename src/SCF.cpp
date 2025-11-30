@@ -720,12 +720,12 @@ void SCF::buildFockMatrixDirect()
     K_alpha = K_alpha.selfadjointView<Eigen::Upper>();
 
     // F_m = F_{m-1} + I(D_m - D_{m-1})
-    this->F_alpha = this->F_alpha_prev + J - K_alpha;
+    this->F_alpha      = this->F_alpha_prev + J - K_alpha;
     this->F_alpha_prev = this->F_alpha;
     if (this->options.unrestricted)
     {
-        K_beta       = K_beta.selfadjointView<Eigen::Upper>();
-        this->F_beta = this->F_beta_prev + J - K_beta;
+        K_beta            = K_beta.selfadjointView<Eigen::Upper>();
+        this->F_beta      = this->F_beta_prev + J - K_beta;
         this->F_beta_prev = this->F_beta;
     }
     else
@@ -1102,6 +1102,11 @@ std::string SCF::printJobSpec() const
             atom.coords.y(),
             atom.coords.z()
         );
+    }
+
+    if (this->options.useSymmetry)
+    {
+        ss << fmt::format("Point Group: {}.\n", this->molecule->getPointGroup());
     }
 
     return ss.str();

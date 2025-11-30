@@ -29,6 +29,7 @@ Molecule::Molecule(
         auto SEAs                   = Symmetry::findSEAs(this->geometry, symmetryTolerance);
         auto [symbol, paxis, saxis] = Symmetry::findPointGroup(this->geometry, symmetryTolerance);
         Symmetry::rotateToNewAxes(this->geometry, saxis, paxis.cross(saxis), paxis);
+        this->pointGroupName = symbol;
     }
     else
     {

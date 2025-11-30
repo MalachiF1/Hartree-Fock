@@ -178,7 +178,7 @@ class Molecule
     double getSymmetryTol() const { return symmetryTolerance; }
     size_t getElectronCount() const { return electronCount; }
     const std::vector<Atom>& getGeometry() const { return geometry; }
-    // const PointGroup& getPointGroup() const { return pointGroup; }
+    const std::string& getPointGroup() const { return pointGroupName; }
     // const PointGroup& getAbelianSubgroup() const { return abelianSubgroup; }
     std::vector<std::string> getAOLabels() const;
 
@@ -205,6 +205,7 @@ class Molecule
     std::vector<Atom> geometry;
     size_t electronCount;
     Basis basis;
+    std::string pointGroupName;
     // PointGroup pointGroup;
     // PointGroup abelianSubgroup;
 };
