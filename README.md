@@ -39,7 +39,7 @@ sudo apt install make gcc libopenblas-dev
 ```bash
 git clone --recurse-submodules https://github.com/MalachiF1/Hartree-Fock.git
 cd Hartree-Fock
-make
+make -j $nproc
 ```
 
 ## How to Use
@@ -133,7 +133,7 @@ This structure allows many intermediate quantities to be reused regardless of th
 PRISM dynamically chooses the optimal contraction/transformation path for each batch of shell-quartets to maximize efficiency. Shell-quartets should be calculated by batches of similar quartets at a time (i.e. have the same angular momenta and degrees of contraction) in order to maximize utilization of vectorization (SIMD).
 
 The integral workload is divided into muliple parallel threads using OpemMP. 
-For the initial $\left[0\right]_{m}$ integrals, the Boys function is evaluated using an effiient interpolation-recurrence algorithm based on Ref [[5]](#5).
+For the initial $\left[0\right]_{m}$ integrals, the Boys function is evaluated using an efficient interpolation-recurrence algorithm based on Ref [[5]](#5).
 
 ### Integral Screening
 
