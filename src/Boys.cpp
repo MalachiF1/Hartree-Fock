@@ -91,14 +91,10 @@ double Boys::analyticalBoys(unsigned m, double T)
 
 GridManager::GridManager()
 {
-    constexpr size_t gridMaxOrder = MAX_L + 2;
-    constexpr size_t totalSize    = static_cast<size_t>(gridMaxOrder + 1) * numGridPoints;
-    grid.resize(totalSize);
-
     std::ifstream in("boys_grid.data", std::ios_base::binary);
     if (!in.read((char*)grid.data(), totalSize * sizeof(double)))
     {
-        for (size_t i = 0; i <= numGridPoints; ++i)
+        for (size_t i = 0; i <= numGridPointsPerOrder; ++i)
         {
             double T_i = i * GRID_STEP_DELTA;
             for (size_t j = 0; j < gridMaxOrder; ++j) { grid[i * gridMaxOrder + j] = Boys::analyticalBoys(j, T_i); }

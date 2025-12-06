@@ -1,7 +1,6 @@
 #pragma once
 #include <array>
 #include <span>
-#include <vector>
 
 constexpr static double SQRT_PI_BY_2    = 0.8862269254527579;
 constexpr static double GRID_STEP_DELTA = 5.0e-5;
@@ -29,6 +28,14 @@ class Boys
 
 class GridManager
 {
+  private:
+    static constexpr size_t gridMaxOrder          = MAX_L + 2;
+    static constexpr size_t numGridPointsPerOrder = static_cast<size_t>(GRID_MAX / GRID_STEP_DELTA) + 1;
+    static constexpr size_t totalSize             = (numGridPointsPerOrder + 1) * gridMaxOrder;
+    std::array<double, GridManager::totalSize> grid;
+
+    GridManager();
+
   public:
     static GridManager& getInstance()
     {
@@ -36,7 +43,7 @@ class GridManager
         return instance;
     }
 
-    const std::vector<double>& getGrid() const { return grid; }
+    const std::array<double, GridManager::totalSize>& getGrid() const { return grid; }
     const double& getValue(size_t i, size_t j) const
     {
         constexpr size_t gridMaxOrder = MAX_L + 2;
@@ -45,10 +52,4 @@ class GridManager
 
     GridManager(const GridManager&)    = delete;
     void operator=(const GridManager&) = delete;
-
-  private:
-    std::vector<double> grid;
-    static constexpr size_t numGridPoints = static_cast<size_t>(GRID_MAX / GRID_STEP_DELTA) + 1;
-
-    GridManager();
 };
