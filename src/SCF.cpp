@@ -541,7 +541,9 @@ void SCF::buildFockMatrixDirect()
     // Pre-calculate the maximum density elements for each shell pair for density screening.
     Eigen::MatrixXd deltaDtotMax   = Eigen::MatrixXd::Zero(nShells, nShells);
     Eigen::MatrixXd deltaDalphaMax = Eigen::MatrixXd::Zero(nShells, nShells);
-    Eigen::MatrixXd deltaDbetaMax  = Eigen::MatrixXd::Zero(nShells, nShells);
+    Eigen::MatrixXd deltaDbetaMax;
+    if (this->options.unrestricted)
+        deltaDbetaMax = Eigen::MatrixXd::Zero(nShells, nShells);
 
 #pragma omp parallel for collapse(2)
     for (size_t s1 = 0; s1 < nShells; ++s1)
@@ -551,7 +553,7 @@ void SCF::buildFockMatrixDirect()
             double maxValTot = 0.0, maxValAlpha = 0.0, maxValBeta = 0.0;
             for (int a = aoOffsets[s1]; a < aoOffsets[s1] + nAOs[s1]; ++a)
             {
-                for (int b = aoOffsets[s2]; a < aoOffsets[s2] + nAOs[s2]; ++b)
+                for (int b = aoOffsets[s2]; b < aoOffsets[s2] + nAOs[s2]; ++b)
                 {
                     maxValTot   = std::max(maxValTot, std::abs(deltaD_tot(a, b)));
                     maxValAlpha = std::max(maxValAlpha, std::abs(deltaD_alpha(a, b)));

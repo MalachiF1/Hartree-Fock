@@ -119,7 +119,9 @@ Input::InputSettings Input::read()
         scfInputSettings.scfOptions.symmetryTolerance
     );
 
-    BasisSet basis(basisSettings.basisName, moleculeSettings.geometry);
+    // Important to use molecule.getGeometry() and not moleculeSettings.geometry
+    // because the Molecule constructor may have modified the geometry
+    BasisSet basis(basisSettings.basisName, molecule.getGeometry());
 
     SCFOptions options = scfInputSettings.scfOptions;
     if (!scfInputSettings.optionsSet[UNRESTRICTED])

@@ -942,7 +942,7 @@ void IntegralEngine::electronRepulsion(
                 const double coeffC = coeff[primOffsetC + pC];
                 const double coeffD = coeff[primOffsetD + pD];
                 const double* normC = &normalizationFactors[normFactorOffsets[shellC_idx] + pC * naoC];
-                const double* normD = &normalizationFactors[normFactorOffsets[shellD_idx] + pC * naoD];
+                const double* normD = &normalizationFactors[normFactorOffsets[shellD_idx] + pD * naoD];
 
                 const double coeffProd = coeffA * coeffB * coeffC * coeffD;
 
